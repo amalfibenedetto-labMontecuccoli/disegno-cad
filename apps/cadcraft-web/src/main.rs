@@ -100,7 +100,14 @@ mod web {
     /// no file system either, so a dropped file is opened from its contents and APPLOAD says to
     /// drop a `.lsp` file rather than asking for a name it cannot read.
     fn services() -> Services {
-        Services { pick_save: Some(Box::new(|name: &str| Some(name.to_string()))), no_file_system: true, ..Services::default() }
+        Services {
+            pick_save: Some(Box::new(|name: &str| Some(name.to_string()))),
+            no_file_system: true,
+            // The school build: 2D only, with the "Send to teacher" button (`drive.rs`).
+            school_mode: true,
+            send_to_teacher: Some(Box::new(crate::drive::request_share)),
+            ..Services::default()
+        }
     }
 
     pub fn start() {

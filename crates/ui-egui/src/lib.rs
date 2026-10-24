@@ -199,6 +199,12 @@ pub struct Services {
     /// The host has no file system to read a path from (the browser): a dropped file's contents
     /// are what it loads, and APPLOAD says so instead of asking for a name it cannot read.
     pub no_file_system: bool,
+    /// Classroom build: a plain 2D workspace for young students. It hides the Modeling tool
+    /// set and the ViewCube and adds the always-visible "Send to teacher" button to the tool bar.
+    pub school_mode: bool,
+    /// "Send to teacher": called with `true` just before the drawing is saved and with `false`
+    /// right after, so the host can pass the saved file on to the teacher when it delivers it.
+    pub send_to_teacher: Option<Box<dyn Fn(bool)>>,
 }
 
 pub struct CadApp {

@@ -70,6 +70,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.cmdline.clear", "Clear Command History", &[], None),
     ("ui.dialog.language", "Interface Language", &["Edit", "Interface Language"], None),
     ("ui.language", "Language", &[], None),
+    ("ui.sendteacher", "Send to teacher", &["File", "Send to teacher"], None),
     ("ui.noop", "", &[], None),
     ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
 ];
@@ -259,6 +260,19 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.toggle.systemcursor" => {
             toggle(&mut app.ui.system_cursor, params);
+            Ok(Value::Null)
+        }
+        // Save the drawing and hand the saved file to the teacher (the host does the sending).
+        "ui.sendteacher" => {
+            if let Some(send) = &app.services.send_to_teacher {
+                send(true);
+            } else {
+                return Some(Err("Send to teacher is not available here".to_string()));
+            }
+            app.start("qsave");
+            if let Some(send) = &app.services.send_to_teacher {
+                send(false);
+            }
             Ok(Value::Null)
         }
         "ui.toggle.viewcube" => {

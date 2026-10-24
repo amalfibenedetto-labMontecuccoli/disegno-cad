@@ -46,6 +46,48 @@ pub fn created_id(answer: &Value) -> Option<String> {
     answer.get("id")?.as_str().map(str::to_string)
 }
 
+/// Most teachers read from `docenti.json`; more are ignored.
+const MAX_TEACHERS: usize = 20;
+
+/// A teacher the drawings are sent to.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Teacher {
+    pub name: String,
+    pub email: String,
+}
+
+/// The teachers listed in `docenti.json`: `{"docenti": [{"nome": "Prof. Rossi", "email": "…"}]}`.
+/// Entries without something that looks like an email address are skipped.
+pub fn parse_teachers(json: &Value) -> Vec<Teacher> {
+    let Some(list) = json.get("docenti").and_then(Value::as_array) else { return Vec::new() };
+    list.iter()
+        .filter_map(|entry| {
+            let email = entry.get("email")?.as_str()?.trim();
+            let (user, domain) = email.split_once('@')?;
+            if user.is_empty() || !domain.contains('.') || email.chars().any(char::is_whitespace) {
+                return None;
+            }
+            let name = entry.get("nome").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).unwrap_or(email);
+            Some(Teacher { name: name.to_string(), email: email.to_string() })
+        })
+        .take(MAX_TEACHERS)
+        .collect()
+}
+
+/// The text of the email Drive sends the teacher with the shared drawing.
+pub fn share_message(student: &str, file: &str) -> String {
+    if student.trim().is_empty() {
+        format!("Disegno inviato da un alunno: {file}")
+    } else {
+        format!("Disegno inviato da {student}: {file}")
+    }
+}
+
+/// The signed-in user's display name in a `about` answer.
+pub fn user_name(answer: &Value) -> Option<String> {
+    answer.get("user")?.get("displayName")?.as_str().map(str::to_string)
+}
+
 /// At most `max` characters of `text`, for an error message.
 pub fn short(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
@@ -89,5 +131,39 @@ mod tests {
         assert_eq!(created_id(&json!({"id": "xyz"})).as_deref(), Some("xyz"));
         assert_eq!(created_id(&json!([])), None);
         assert_eq!(short("héllo wörld", 5), "héllo");
+    }
+
+    /// Guards the teacher list: good entries are kept with their names, a missing name falls
+    /// back to the address, and entries without a usable address (or a broken file) are dropped
+    /// rather than failing the whole send.
+    #[test]
+    fn teachers_are_read_from_the_config_and_bad_entries_are_dropped() {
+        let config = json!({"docenti": [
+            {"nome": "Prof. Rossi", "email": " rossi@smpavullo.com "},
+            {"email": "bianchi@smpavullo.com"},
+            {"nome": "Senza email"},
+            {"nome": "Rotta", "email": "non-un-indirizzo"},
+            {"nome": "Spazi", "email": "a b@x.it"},
+            {"nome": "Numero", "email": 7}
+        ]});
+        assert_eq!(
+            parse_teachers(&config),
+            [
+                Teacher { name: "Prof. Rossi".into(), email: "rossi@smpavullo.com".into() },
+                Teacher { name: "bianchi@smpavullo.com".into(), email: "bianchi@smpavullo.com".into() },
+            ]
+        );
+        assert!(parse_teachers(&json!({})).is_empty());
+        assert!(parse_teachers(&json!({"docenti": "no"})).is_empty());
+        assert!(parse_teachers(&json!([])).is_empty());
+    }
+
+    /// Guards the email text: it names the student when Google says who they are.
+    #[test]
+    fn share_message_names_the_student_when_known() {
+        assert_eq!(share_message("Mario Rossi", "stella.dxf"), "Disegno inviato da Mario Rossi: stella.dxf");
+        assert_eq!(share_message("  ", "stella.dxf"), "Disegno inviato da un alunno: stella.dxf");
+        assert_eq!(user_name(&json!({"user": {"displayName": "Mario Rossi"}})).as_deref(), Some("Mario Rossi"));
+        assert_eq!(user_name(&json!({})), None);
     }
 }

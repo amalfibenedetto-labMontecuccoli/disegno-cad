@@ -27,9 +27,8 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
         (Icon::Import, "import", "Import", None),
         (Icon::Export, "export", "Export", None),
         (Icon::Attach, "attach", "Attach", None),
-        (Icon::Share, "share", "Share", None),
     ],
-    &[(Icon::ZoomWindow, "zoom.window", "Zoom Window", None), (Icon::Pan, "pan", "Pan", None), (Icon::Orbit, "3dorbit", "Orbit", None)],
+    &[(Icon::ZoomWindow, "zoom.window", "Zoom Window", None), (Icon::Pan, "pan", "Pan", None)],
     &[
         (Icon::ZoomExtents, "zoom.extents", "Zoom Extents", None),
         (Icon::Properties, "ui.toggle.palettes", "Properties", None),
@@ -95,8 +94,12 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let size = 26.0;
             let mut clicked = None;
             let mac = ui.ctx().os().is_mac();
+            let school = app.services.school_mode;
+            if school && send_button(ui, row) {
+                app.start("ui.sendteacher");
+            }
             let widths: Vec<_> = TOOLBAR.iter().map(|group| group.len() as f32 * (size + 6.0) - 6.0).collect();
-            let available = (row.right() - 12.0 - x).max(0.0);
+            let available = (row.right() - 12.0 - x - if school { SEND_BUTTON_W + 8.0 } else { 0.0 }).max(0.0);
             let Some(fit) = craft_ui::layout::fit_toolbar(&widths, available, 24.0, 30.0) else {
                 // Very small windows still expose the complete command row by scrolling.
                 ui.scope_builder(egui::UiBuilder::new().max_rect(row.shrink2(vec2(4.0, 0.0))), |ui| {
@@ -172,6 +175,24 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
     });
+}
+
+/// Width of the classroom "Send to teacher" button.
+const SEND_BUTTON_W: f32 = 176.0;
+
+/// The classroom "Send to teacher" button at the right end of the tool bar row; true when it was
+/// clicked. It is a labelled button, not an icon, so a young student can find it at a glance.
+fn send_button(ui: &mut egui::Ui, row: Rect) -> bool {
+    let t = Tokens::get();
+    let rect = Rect::from_min_size(pos2(row.right() - SEND_BUTTON_W - 8.0, row.center().y - 14.0), vec2(SEND_BUTTON_W, 28.0));
+    let resp = ui.interact(rect, ui.id().with("send_to_teacher"), Sense::click());
+    let fill = if resp.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
+    ui.painter().rect_filled(rect, 6.0, fill);
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(16.0, 16.0)), Icon::Share, false);
+    let label = crate::i18n::t("Send to teacher").to_string();
+    ui.painter().text(pos2(rect.left() + 34.0, rect.center().y), egui::Align2::LEFT_CENTER, &label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+    icons::describe_control(ui, &resp, &label, None, false);
+    resp.on_hover_text(label).clicked()
 }
 
 /// File tabs: switcher, "+", Start, open drawings.

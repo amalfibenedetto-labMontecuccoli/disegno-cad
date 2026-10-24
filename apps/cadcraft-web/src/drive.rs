@@ -8,7 +8,7 @@
 //! `deliver` returns at once, so the engine counts the drawing as saved while the upload runs in
 //! the background; the fallback download and the messages keep that honest.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use serde_json::{Value, json};
 use wasm_bindgen::closure::Closure;
@@ -27,7 +27,10 @@ const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 const DOMAIN_HINT: &str = "smpavullo.com";
 const GIS_URL: &str = "https://accounts.google.com/gsi/client";
 const FOLDER_NAME: &str = "Disegni";
+const DRIVE_URL: &str = "https://www.googleapis.com/drive/v3";
 const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
+/// Who the "Send to teacher" button sends to; edited on GitHub, no rebuild of the code needed.
+const TEACHERS_FILE: &str = "docenti.json";
 const UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files";
 /// Drive's simple multipart upload is meant for files up to 5 MB; bigger ones are downloaded.
 const MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
@@ -42,6 +45,15 @@ struct Token {
 
 thread_local! {
     static TOKEN: RefCell<Option<Token>> = const { RefCell::new(None) };
+    /// Set while the "Send to teacher" button saves the drawing: the file [`deliver`] gets in
+    /// that time is also shared with the teachers.
+    static SHARE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The classroom button's hook ([`cadcraft_ui_egui::Services::send_to_teacher`]): `true` just
+/// before the drawing is saved, `false` right after.
+pub fn request_share(on: bool) {
+    SHARE.with(|s| s.set(on));
 }
 
 /// The engine's delivery hook on the web ([`cadcraft_engine::cmd::file::set_deliver`]).
@@ -49,10 +61,15 @@ pub fn deliver(name: &str, mime: &str, bytes: &[u8]) -> Result<(), String> {
     if drive_disabled() || bytes.len() > MAX_UPLOAD_BYTES {
         return crate::download::download(name, mime, bytes);
     }
+    let share = SHARE.with(|s| s.get());
     let (name, mime, bytes) = (name.to_string(), mime.to_string(), bytes.to_vec());
     wasm_bindgen_futures::spawn_local(async move {
         match save(&name, &mime, &bytes).await {
-            Ok(()) => notify(&format!("Salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
+            Ok((token, id)) if share => match share_with_teachers(&token, &id, &name).await {
+                Ok(teachers) => notify(&format!("Disegno inviato a {teachers}.\nÈ anche salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
+                Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma NON è stato inviato al docente: {e}")),
+            },
+            Ok(_) => notify(&format!("Salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
             Err(e) => {
                 log::warn!("save to Drive failed: {e}");
                 match crate::download::download(&name, &mime, &bytes) {
@@ -77,16 +94,58 @@ fn notify(message: &str) {
 }
 
 /// Put `bytes` in the "Disegni" folder as `name`, replacing the file of that name if it is there.
-async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<(), String> {
+/// Returns the access token used and the id of the file in Drive.
+async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<(String, String), String> {
     let token = access_token().await?;
     let folder = find_or_create_folder(&token).await?;
     let existing = find_file(&token, &folder, name).await?;
     let (url, method, meta) = match existing {
-        Some(id) => (format!("{UPLOAD_URL}/{id}?uploadType=multipart"), "PATCH", json!({ "name": name })),
-        None => (format!("{UPLOAD_URL}?uploadType=multipart"), "POST", json!({ "name": name, "parents": [folder] })),
+        Some(id) => (format!("{UPLOAD_URL}/{id}?uploadType=multipart&fields=id"), "PATCH", json!({ "name": name })),
+        None => (format!("{UPLOAD_URL}?uploadType=multipart&fields=id"), "POST", json!({ "name": name, "parents": [folder] })),
     };
     let (content_type, body) = drivefmt::multipart(&meta, mime, bytes);
-    request(&token, method, &url, Some(&content_type), Some(body)).await.map(|_| ())
+    let answer = request(&token, method, &url, Some(&content_type), Some(body)).await?;
+    let id = drivefmt::created_id(&answer).ok_or_else(|| "Drive non ha restituito il file salvato".to_string())?;
+    Ok((token, id))
+}
+
+/// Share the saved file with every teacher in `docenti.json` (read-only; Drive emails them).
+/// Returns the teachers' names for the message to the student.
+async fn share_with_teachers(token: &str, file_id: &str, file_name: &str) -> Result<String, String> {
+    let teachers = load_teachers().await?;
+    if teachers.is_empty() {
+        return Err("nessun docente è configurato (file docenti.json)".to_string());
+    }
+    let student = request(token, "GET", &format!("{DRIVE_URL}/about?fields=user(displayName)"), None, None)
+        .await
+        .ok()
+        .and_then(|answer| drivefmt::user_name(&answer))
+        .unwrap_or_default();
+    let message = encode(&drivefmt::share_message(&student, file_name));
+    for teacher in &teachers {
+        let url = format!("{FILES_URL}/{file_id}/permissions?sendNotificationEmail=true&emailMessage={message}&fields=id");
+        let body = json!({ "type": "user", "role": "reader", "emailAddress": teacher.email });
+        request(token, "POST", &url, Some("application/json"), Some(body.to_string().into_bytes()))
+            .await
+            .map_err(|e| format!("condivisione con {} non riuscita ({e})", teacher.name))?;
+    }
+    Ok(teachers.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "))
+}
+
+/// The teachers in `docenti.json`, which sits next to the page.
+async fn load_teachers() -> Result<Vec<drivefmt::Teacher>, String> {
+    let window = web_sys::window().ok_or("nessuna finestra del browser")?;
+    let response = JsFuture::from(window.fetch_with_str(TEACHERS_FILE))
+        .await
+        .map_err(js_error)?
+        .dyn_into::<web_sys::Response>()
+        .map_err(|_| "risposta non valida".to_string())?;
+    if !response.ok() {
+        return Err(format!("non trovo {TEACHERS_FILE} ({})", response.status()));
+    }
+    let text = JsFuture::from(response.text().map_err(js_error)?).await.map_err(js_error)?.as_string().unwrap_or_default();
+    let json: Value = serde_json::from_str(&text).map_err(|e| format!("{TEACHERS_FILE} non è leggibile: {e}"))?;
+    Ok(drivefmt::parse_teachers(&json))
 }
 
 async fn find_or_create_folder(token: &str) -> Result<String, String> {

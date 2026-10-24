@@ -147,7 +147,12 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling"] {
+        // The classroom build has no 3D, so it shows the Drafting tool set only.
+        let tabs: &[&str] = if app.services.school_mode { &["Drafting"] } else { &["Drafting", "Modeling"] };
+        if app.services.school_mode {
+            app.ui.toolset_tab = "Drafting".into();
+        }
+        for name in tabs.iter().copied() {
             let w = 92.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
             let active = app.ui.toolset_tab == name;

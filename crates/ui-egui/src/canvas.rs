@@ -2016,7 +2016,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         draw_ucs_icon(&painter, rect);
         crate::viewcube::ucs_icon(app, ui, rect);
     }
-    if app.ui.show_viewcube && sheet.is_none() {
+    if app.ui.show_viewcube && sheet.is_none() && !app.services.school_mode {
         draw_viewcube(app, ui, rect);
     }
     viewport_label(&painter, rect);
