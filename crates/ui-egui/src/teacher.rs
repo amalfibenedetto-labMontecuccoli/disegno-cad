@@ -99,7 +99,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 /// The window shown once the drawing is saved and linked: the link, a Copy button and what to do
 /// with it in Classroom.
 pub fn link_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
-    let Some((name, link)) = app.ui.share_link.clone() else {
+    let Some((name, link, folder)) = app.ui.share_link.clone() else {
         *open = false;
         return;
     };
@@ -131,10 +131,47 @@ pub fn link_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             });
             ui.add_space(6.0);
             ui.label(crate::tl!("In Classroom: open the assignment, choose Add or create, then Link, and paste it."));
+            ui.add_space(6.0);
+            ui.hyperlink_to(crate::tl!("Open the Disegni folder in Drive"), &folder);
         });
     if copy {
         ctx.copy_text(link);
         ctx.data_mut(|d| d.insert_temp(copied_id, true));
+    }
+}
+
+/// The window offered when the app opens: sign in with the school's Google account once, so
+/// saving and handing in don't ask again. It closes itself when the sign-in is done.
+pub fn signin_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    if app.services.account.as_ref().and_then(|name| name()).is_some() {
+        *open = false;
+        return;
+    }
+    let (mut go, mut later) = (false, false);
+    egui::Window::new(crate::tl!("Welcome"))
+        .id(egui::Id::new("sign_in_window"))
+        .open(open)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.label(crate::tl!("Sign in with your school Google account to save your drawings and hand them in."));
+            ui.add_space(8.0);
+            if ui.add(egui::Button::new(egui::RichText::new(crate::tl!("Sign in with Google")).size(16.0)).min_size(vec2(380.0, 36.0))).clicked() {
+                go = true;
+            }
+            ui.add_space(4.0);
+            if ui.button(crate::tl!("Later")).clicked() {
+                later = true;
+            }
+        });
+    if go {
+        *open = false;
+        app.start("ui.signin");
+    }
+    if later {
+        *open = false;
     }
 }
 

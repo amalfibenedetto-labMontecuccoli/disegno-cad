@@ -20,6 +20,7 @@ pub mod cmdline;
 pub mod context_menu;
 pub mod control;
 pub mod credits;
+pub mod school;
 pub mod teacher;
 pub mod dialogs;
 pub mod docking;
@@ -119,7 +120,10 @@ pub struct UiState {
     pub send_error: String,
     /// The drawing just saved for hand-in (file name, Drive link), shown in its dialog.
     #[serde(skip)]
-    pub share_link: Option<(String, String)>,
+    pub share_link: Option<(String, String, String)>,
+    /// The classroom build's Simple mode (basic tools and squared-paper snaps); the full interface
+    /// otherwise. Only the classroom build (`Services::school_mode`) offers it.
+    pub simple_mode: bool,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -195,6 +199,7 @@ impl Default for UiState {
             teacher_email: String::new(),
             send_error: String::new(),
             share_link: None,
+            simple_mode: true,
         }
     }
 }
@@ -224,6 +229,12 @@ pub struct Services {
     /// `false` right after, so the host can make a link to the saved file and report it back
     /// with [`CadApp::show_share_link`].
     pub share_link: Option<Box<dyn Fn(bool)>>,
+    /// Start the sign-in with the school's Google account.
+    pub sign_in: Option<Box<dyn Fn()>>,
+    /// Forget the signed-in account.
+    pub sign_out: Option<Box<dyn Fn()>>,
+    /// The signed-in student's name, `None` when nobody is signed in.
+    pub account: Option<Box<dyn Fn() -> Option<String>>>,
 }
 
 pub struct CadApp {
@@ -424,6 +435,7 @@ impl CadApp {
         if !self.ui.teacher_email.is_empty() {
             prefs["teacherEmail"] = json!(self.ui.teacher_email);
         }
+        prefs["simpleMode"] = json!(self.ui.simple_mode);
         prefs.to_string()
     }
 
@@ -454,6 +466,9 @@ impl CadApp {
         if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
             self.ui.last_lisp_dir = Some(dir.to_string());
         }
+        if let Some(simple) = v.get("simpleMode").and_then(Value::as_bool) {
+            self.ui.simple_mode = simple;
+        }
         if let Some(email) = v.get("teacherEmail").and_then(Value::as_str).filter(|e| e.chars().count() <= 254) {
             self.ui.teacher_email = email.to_string();
         }
@@ -461,9 +476,25 @@ impl CadApp {
 
     /// The host made a link to the drawing it just saved: show it, ready to copy and paste into
     /// the assignment.
-    pub fn show_share_link(&mut self, name: &str, link: &str) {
-        self.ui.share_link = Some((name.to_string(), link.to_string()));
+    pub fn show_share_link(&mut self, name: &str, link: &str, folder: &str) {
+        self.ui.share_link = Some((name.to_string(), link.to_string(), folder.to_string()));
         self.ui.dialog = Some("sharelink".into());
+    }
+
+    /// Whether the classroom build is in its Simple mode.
+    pub fn simple_ui(&self) -> bool {
+        self.services.school_mode && self.ui.simple_mode
+    }
+
+    /// The squared-paper drafting defaults of Simple mode: snap to the grid, grid on, and the
+    /// object snaps a student wants (end, middle, centre, quadrant, intersection, perpendicular).
+    pub fn apply_simple_defaults(&mut self) {
+        let s = &mut self.session.settings;
+        s.snapmode = true;
+        s.gridmode = true;
+        s.osmode = school::SIMPLE_OSMODE;
+        s.orthomode = false;
+        s.measureinit = true;
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {

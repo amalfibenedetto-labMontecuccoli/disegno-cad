@@ -188,7 +188,11 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 let groups: &[(&str, &[Tool], &[Tool])] = if app.ui.toolset_tab == "Drafting" { DRAFTING } else { MODELING };
+                let simple = app.simple_ui();
                 for (name, large, small) in groups {
+                    if simple && !crate::school::SIMPLE_GROUPS.contains(name) {
+                        continue;
+                    }
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
                     // Header.
                     let (hr, hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
@@ -215,7 +219,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                     if hresp.clicked() {
                         toggle_group = Some(name.to_string());
                     }
-                    let hidden = |cmd: &str| app.ui.hidden_tools.iter().any(|h| h == cmd);
+                    let hidden = |cmd: &str| app.ui.hidden_tools.iter().any(|h| h == cmd) || (simple && !crate::school::tool_allowed(cmd));
                     egui::Popup::from_toggle_button_response(&gresp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                         ui.label(crate::tl!("Show in Tool Sets"));
                         for (_, cmd, tip) in large.iter().chain(small.iter()) {

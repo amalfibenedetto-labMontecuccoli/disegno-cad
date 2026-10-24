@@ -48,8 +48,8 @@ mod web {
         /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             crate::drive::remember_context(ctx);
-            if let Some((name, link)) = crate::drive::take_link() {
-                self.0.show_share_link(&name, &link);
+            if let Some((name, link, folder)) = crate::drive::take_link() {
+                self.0.show_share_link(&name, &link, &folder);
             }
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
@@ -111,6 +111,9 @@ mod web {
             school_mode: true,
             send_to_teacher: Some(Box::new(crate::drive::request_share)),
             share_link: Some(Box::new(crate::drive::request_link)),
+            sign_in: Some(Box::new(crate::drive::sign_in)),
+            sign_out: Some(Box::new(crate::drive::sign_out)),
+            account: Some(Box::new(crate::drive::account)),
             teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
             ..Services::default()
         }
@@ -178,6 +181,14 @@ mod web {
                             // eframe's web runner has no stencil buffer: clipped layout
                             // viewports stay in the layout's display list.
                             app.set_wgpu(rs, None);
+                        }
+                        // The classroom defaults (Simple mode: snaps and grid like squared paper), then
+                        // the sign-in window unless this tab is already signed in.
+                        if app.simple_ui() {
+                            app.apply_simple_defaults();
+                        }
+                        if app_bridge.is_none() && !crate::drive::signed_in() {
+                            app.ui.dialog = Some("signin".into());
                         }
                         if query().contains("sample") {
                             let _ = app.run("ui.sample", serde_json::json!({}));

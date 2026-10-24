@@ -95,18 +95,35 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let mut clicked = None;
             let mac = ui.ctx().os().is_mac();
             let school = app.services.school_mode;
-            if school && send_button(ui, row) {
-                app.start("ui.sendteacher");
+            let simple = app.simple_ui();
+            let mut right = row.right() - 8.0;
+            if school {
+                if send_button(ui, row) {
+                    app.start("ui.sendteacher");
+                }
+                right -= SEND_BUTTON_W + 10.0;
+                if let Some(to_simple) = mode_switch(ui, row, right, simple) {
+                    app.start(if to_simple { "ui.mode.simple" } else { "ui.mode.normal" });
+                }
+                right -= MODE_W + 10.0;
+                let account = app.services.account.as_ref().and_then(|name| name());
+                match account_widget(ui, row, right, account.as_deref()) {
+                    Some(AccountClick::SignIn) => app.start("ui.signin"),
+                    Some(AccountClick::SignOut) => app.start("ui.signout"),
+                    None => {}
+                }
+                right -= ACCOUNT_W + 10.0;
             }
-            let widths: Vec<_> = TOOLBAR.iter().map(|group| group.len() as f32 * (size + 6.0) - 6.0).collect();
-            let available = (row.right() - 12.0 - x - if school { SEND_BUTTON_W + 8.0 } else { 0.0 }).max(0.0);
+            let groups = toolbar_groups(simple);
+            let widths: Vec<_> = groups.iter().map(|group| group.len() as f32 * (size + 6.0) - 6.0).collect();
+            let available = (right - 4.0 - x).max(0.0);
             let Some(fit) = craft_ui::layout::fit_toolbar(&widths, available, 24.0, 30.0) else {
                 // Very small windows still expose the complete command row by scrolling.
                 ui.scope_builder(egui::UiBuilder::new().max_rect(row.shrink2(vec2(4.0, 0.0))), |ui| {
                     egui::ScrollArea::horizontal().id_salt("toolbar_small").show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            for group in TOOLBAR {
-                                for (icon, cmd, tip, _) in *group {
+                            for group in &groups {
+                                for (icon, cmd, tip, _) in group {
                                     if icons::button(ui, *icon, size, tip, false).clicked() {
                                         clicked = Some(*cmd);
                                     }
@@ -122,7 +139,7 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                 return;
             };
             for (index, _) in &fit.shown {
-                let Some(group) = TOOLBAR.get(*index) else { continue };
+                let Some(group) = groups.get(*index) else { continue };
                 for (icon, cmd, label, shortcut) in group.iter() {
                     let br = Rect::from_min_size(pos2(x, row.center().y - size / 2.0), vec2(size, size));
                     let resp = ui.interact(br, ui.id().with(("tb", *cmd)), Sense::click());
@@ -154,11 +171,11 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                 icons::describe_control(ui, &response, "More toolbar commands", None, false);
                 egui::Popup::menu(&response).show(|ui| {
                     for (position, index) in fit.overflow.iter().enumerate() {
-                        let Some(group) = TOOLBAR.get(*index) else { continue };
+                        let Some(group) = groups.get(*index) else { continue };
                         if position > 0 {
                             ui.separator();
                         }
-                        for (_, command, label, _) in *group {
+                        for (_, command, label, _) in group {
                             let response = ui.button(crate::i18n::t(label));
                             crate::control::record_widget(ui, &response, label, "button", None);
                             if response.clicked() {
@@ -177,8 +194,86 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Width of the classroom "Send to teacher" button.
-const SEND_BUTTON_W: f32 = 176.0;
+type ToolbarItem = (Icon, &'static str, &'static str, Option<&'static str>);
+
+/// The tool bar groups to show: all of them, or in Simple mode only the basic buttons.
+fn toolbar_groups(simple: bool) -> Vec<Vec<ToolbarItem>> {
+    TOOLBAR
+        .iter()
+        .map(|group| group.iter().copied().filter(|(_, cmd, _, _)| !simple || crate::school::SIMPLE_TOOLBAR.contains(cmd)).collect::<Vec<_>>())
+        .filter(|group| !group.is_empty())
+        .collect()
+}
+
+/// Width of the classroom "Hand in" button.
+const SEND_BUTTON_W: f32 = 150.0;
+/// Width of the Simple / Normal switch.
+const MODE_W: f32 = 150.0;
+/// Width of the account button.
+const ACCOUNT_W: f32 = 170.0;
+
+enum AccountClick {
+    SignIn,
+    SignOut,
+}
+
+/// The Simple / Normal switch left of the Hand in button; the mode just chosen (`true` for
+/// Simple), if the student clicked the other half.
+fn mode_switch(ui: &mut egui::Ui, row: Rect, right: f32, simple: bool) -> Option<bool> {
+    let t = Tokens::get();
+    let half = MODE_W / 2.0;
+    let mut chosen = None;
+    for (index, (label, is_simple)) in [("Simple", true), ("Normal", false)].into_iter().enumerate() {
+        let rect = Rect::from_min_size(pos2(right - MODE_W + half * index as f32, row.center().y - 13.0), vec2(half, 26.0));
+        let resp = ui.interact(rect, ui.id().with(("mode_switch", is_simple)), Sense::click());
+        let active = simple == is_simple;
+        let fill = if active {
+            t.accent
+        } else if resp.hovered() {
+            t.control_hover
+        } else {
+            t.chrome_dark
+        };
+        ui.painter().rect_filled(rect, 5.0, fill);
+        let text = crate::i18n::t(label).to_string();
+        let color = if active { egui::Color32::WHITE } else { t.text };
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(13.0), color);
+        icons::describe_control(ui, &resp, &text, Some(active), true);
+        if resp.clicked() && !active {
+            chosen = Some(is_simple);
+        }
+    }
+    chosen
+}
+
+/// The account button left of the mode switch: "Sign in with Google", or the student's name with
+/// a small "Sign out".
+fn account_widget(ui: &mut egui::Ui, row: Rect, right: f32, name: Option<&str>) -> Option<AccountClick> {
+    let t = Tokens::get();
+    let rect = Rect::from_min_size(pos2(right - ACCOUNT_W, row.center().y - 13.0), vec2(ACCOUNT_W, 26.0));
+    match name {
+        None => {
+            let resp = ui.interact(rect, ui.id().with("account_sign_in"), Sense::click());
+            ui.painter().rect_filled(rect, 5.0, if resp.hovered() { t.control_hover } else { t.chrome_dark });
+            ui.painter().rect_stroke(rect, 5.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            let label = crate::i18n::t("Sign in with Google").to_string();
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(13.0), t.text);
+            icons::describe_control(ui, &resp, &label, None, false);
+            resp.clicked().then_some(AccountClick::SignIn)
+        }
+        Some(name) => {
+            ui.painter().rect_filled(rect, 5.0, t.chrome_dark);
+            let shown: String = name.chars().take(16).collect();
+            ui.painter().text(pos2(rect.left() + 8.0, rect.center().y), egui::Align2::LEFT_CENTER, shown, egui::FontId::proportional(13.0), t.text);
+            let out = Rect::from_min_size(pos2(rect.right() - 48.0, rect.top()), vec2(48.0, 26.0));
+            let resp = ui.interact(out, ui.id().with("account_sign_out"), Sense::click());
+            let label = crate::i18n::t("Sign out").to_string();
+            ui.painter().text(out.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(12.0), if resp.hovered() { t.text } else { t.text_dim });
+            icons::describe_control(ui, &resp, &label, None, false);
+            resp.clicked().then_some(AccountClick::SignOut)
+        }
+    }
+}
 
 /// The classroom "Send to teacher" button at the right end of the tool bar row; true when it was
 /// clicked. It is a labelled button, not an icon, so a young student can find it at a glance.

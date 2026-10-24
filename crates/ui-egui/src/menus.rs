@@ -72,6 +72,10 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.language", "Language", &[], None),
     ("ui.sendteacher", "Hand in", &["File", "Hand in"], None),
     ("ui.sharelink", "Save and copy link", &[], None),
+    ("ui.mode.simple", "Simple mode", &["View", "Simple mode"], None),
+    ("ui.mode.normal", "Normal mode", &["View", "Normal mode"], None),
+    ("ui.signin", "Sign in with Google", &[], None),
+    ("ui.signout", "Sign out", &[], None),
     ("ui.noop", "", &[], None),
     ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
 ];
@@ -264,6 +268,26 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         // Save the drawing and hand the saved file to the teacher (the host does the sending).
+        // The classroom build's two interfaces: basic tools with squared-paper snaps, or all.
+        "ui.mode.simple" => {
+            app.ui.simple_mode = true;
+            app.apply_simple_defaults();
+            Ok(Value::Null)
+        }
+        "ui.mode.normal" => {
+            app.ui.simple_mode = false;
+            Ok(Value::Null)
+        }
+        "ui.signin" | "ui.signout" => {
+            let hook = if id == "ui.signin" { &app.services.sign_in } else { &app.services.sign_out };
+            match hook {
+                Some(hook) => {
+                    hook();
+                    Ok(Value::Null)
+                }
+                None => Err("Signing in is not available here".to_string()),
+            }
+        }
         // Save the drawing and have the host make a link to it ([`CadApp::show_share_link`]).
         "ui.sharelink" => {
             let Some(share) = &app.services.share_link else {
@@ -581,7 +605,25 @@ pub fn tree(app: &CadApp) -> Vec<(String, Vec<Entry>)> {
         let at = file.iter().position(|e| matches!(e, Entry::Item { id, .. } if id == "open")).map_or(0, |i| i + 1);
         file.insert(at, Entry::Sub { label: OPEN_RECENT.into(), children: recent_entries(app) });
     }
+    if app.simple_ui() {
+        out.retain(|(menu, _)| crate::school::SIMPLE_MENUS.contains(&menu.as_str()));
+        for (_, entries) in &mut out {
+            prune_for_simple_mode(entries);
+        }
+        out.retain(|(_, entries)| !entries.is_empty());
+    }
     out
+}
+
+/// Simple mode: keep only the entries students need, and the submenus that still hold one.
+fn prune_for_simple_mode(entries: &mut Vec<Entry>) {
+    entries.retain_mut(|entry| match entry {
+        Entry::Item { id, .. } => crate::school::menu_item_allowed(id),
+        Entry::Sub { children, .. } => {
+            prune_for_simple_mode(children);
+            !children.is_empty()
+        }
+    });
 }
 
 /// The items of File ▸ Open Recent: the recent files by name, newest first, then Clear Recent Files.

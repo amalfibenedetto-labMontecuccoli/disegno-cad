@@ -8,7 +8,7 @@
 //! `deliver` returns at once, so the engine counts the drawing as saved while the upload runs in
 //! the background; the fallback download and the messages keep that honest.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use serde_json::{Value, json};
 use wasm_bindgen::closure::Closure;
@@ -57,6 +57,8 @@ struct Saved {
     token: String,
     id: String,
     link: Option<String>,
+    /// The link to the "Disegni" folder in Drive.
+    folder: String,
 }
 
 thread_local! {
@@ -64,8 +66,13 @@ thread_local! {
     /// Set while the Hand in button saves the drawing: what [`deliver`] does with the file it
     /// gets in that time besides keeping it in Drive.
     static SHARE: RefCell<Option<Share>> = const { RefCell::new(None) };
-    /// A link ready to show: the file name and its link, taken by the app's next frame.
-    static LINK: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// A link ready to show: the file name, its link and the folder's link, taken by the app's
+    /// next frame.
+    static LINK: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
+    /// The signed-in student's name.
+    static USER: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Whether the sign-in kept in this browser tab was already looked for.
+    static RESTORED: Cell<bool> = const { Cell::new(false) };
     /// Wakes the app when the background work has something to show.
     static CONTEXT: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
 }
@@ -93,17 +100,97 @@ pub fn remember_context(ctx: &egui::Context) {
 }
 
 /// A link to a drawing that was just saved, if there is one: take it and show it.
-pub fn take_link() -> Option<(String, String)> {
+pub fn take_link() -> Option<(String, String, String)> {
     LINK.with(|l| l.borrow_mut().take())
 }
 
-fn publish_link(name: &str, link: &str) {
-    LINK.with(|l| *l.borrow_mut() = Some((name.to_string(), link.to_string())));
+fn publish_link(name: &str, link: &str, folder: &str) {
+    LINK.with(|l| *l.borrow_mut() = Some((name.to_string(), link.to_string(), folder.to_string())));
+    wake();
+}
+
+/// Ask the app for another frame, so it shows what background work just changed.
+fn wake() {
     CONTEXT.with(|c| {
         if let Some(ctx) = c.borrow().as_ref() {
             ctx.request_repaint();
         }
     });
+}
+
+const SESSION_KEY: &str = "cadcraft_drive_session";
+
+fn session_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.session_storage().ok()?
+}
+
+/// Keep the sign-in for the rest of this browser tab (a reload doesn't ask again).
+fn store_session() {
+    let token = TOKEN.with(|t| t.borrow().as_ref().map(|t| (t.value.clone(), t.expires_at_ms)));
+    let (Some((value, expires)), Some(storage)) = (token, session_storage()) else { return };
+    let name = USER.with(|u| u.borrow().clone());
+    let _ = storage.set_item(SESSION_KEY, &json!({ "token": value, "expires": expires, "name": name }).to_string());
+}
+
+/// Take back the sign-in kept by [`store_session`], once per page load, if it is still valid.
+fn restore_session() {
+    if RESTORED.with(|r| r.replace(true)) {
+        return;
+    }
+    let Some(storage) = session_storage() else { return };
+    let Some(kept) = storage.get_item(SESSION_KEY).ok().flatten().and_then(|text| serde_json::from_str::<Value>(&text).ok()) else { return };
+    let (Some(value), Some(expires)) = (kept.get("token").and_then(Value::as_str), kept.get("expires").and_then(Value::as_f64)) else { return };
+    if expires - TOKEN_MARGIN_MS <= js_sys::Date::now() {
+        let _ = storage.remove_item(SESSION_KEY);
+        return;
+    }
+    TOKEN.with(|t| *t.borrow_mut() = Some(Token { value: value.to_string(), expires_at_ms: expires }));
+    USER.with(|u| *u.borrow_mut() = kept.get("name").and_then(Value::as_str).map(str::to_string));
+}
+
+/// The signed-in student's name while their access is valid, `None` otherwise.
+pub fn account() -> Option<String> {
+    restore_session();
+    let valid = TOKEN.with(|t| t.borrow().as_ref().is_some_and(|t| t.expires_at_ms - TOKEN_MARGIN_MS > js_sys::Date::now()));
+    if !valid {
+        return None;
+    }
+    Some(USER.with(|u| u.borrow().clone()).unwrap_or_else(|| "Google".to_string()))
+}
+
+/// Whether a student is signed in (and their access still valid).
+pub fn signed_in() -> bool {
+    account().is_some()
+}
+
+/// The Sign in button: Google's sign-in popup, then the student's name.
+pub fn sign_in() {
+    wasm_bindgen_futures::spawn_local(async {
+        match access_token().await {
+            Ok(_) => wake(),
+            Err(e) => notify(&format!("Accesso non riuscito: {e}")),
+        }
+    });
+}
+
+/// The Sign out button: forget the account in this tab.
+pub fn sign_out() {
+    TOKEN.with(|t| *t.borrow_mut() = None);
+    USER.with(|u| *u.borrow_mut() = None);
+    if let Some(storage) = session_storage() {
+        let _ = storage.remove_item(SESSION_KEY);
+    }
+    wake();
+}
+
+/// The student's name from Drive, kept for the toolbar.
+async fn remember_user(token: &str) {
+    if USER.with(|u| u.borrow().is_some()) {
+        return;
+    }
+    let answer = request(token, "GET", &format!("{DRIVE_URL}/about?fields=user(displayName)"), None, None).await;
+    let name = answer.ok().and_then(|a| drivefmt::user_name(&a)).unwrap_or_else(|| "Google".to_string());
+    USER.with(|u| *u.borrow_mut() = Some(name));
 }
 
 /// The engine's delivery hook on the web ([`cadcraft_engine::cmd::file::set_deliver`]).
@@ -125,7 +212,7 @@ pub fn deliver(name: &str, mime: &str, bytes: &[u8]) -> Result<(), String> {
                 Some(Share::Link) => match link_for_school(&saved).await {
                     Ok(link) => {
                         copy_to_clipboard(&link);
-                        publish_link(&name, &link);
+                        publish_link(&name, &link, &saved.folder);
                     }
                     Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma non sono riuscito a fare il link: {e}")),
                 },
@@ -184,7 +271,7 @@ async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<Saved, String> {
     let (content_type, body) = drivefmt::multipart(&meta, mime, bytes);
     let answer = request(&token, method, &url, Some(&content_type), Some(body)).await?;
     let id = drivefmt::created_id(&answer).ok_or_else(|| "Drive non ha restituito il file salvato".to_string())?;
-    Ok(Saved { token, id, link: drivefmt::web_link(&answer) })
+    Ok(Saved { token, id, link: drivefmt::web_link(&answer), folder: format!("https://drive.google.com/drive/folders/{folder}") })
 }
 
 /// Let everyone at the school open the file through its link (not search for it, not outside the
@@ -256,6 +343,7 @@ async fn request(token: &str, method: &str, url: &str, content_type: Option<&str
 
 /// A valid access token: the one kept from earlier, or a new one after Google's sign-in popup.
 async fn access_token() -> Result<String, String> {
+    restore_session();
     let now = js_sys::Date::now();
     let kept = TOKEN.with(|t| t.borrow().as_ref().filter(|t| t.expires_at_ms - TOKEN_MARGIN_MS > now).map(|t| t.value.clone()));
     if let Some(value) = kept {
@@ -275,6 +363,8 @@ async fn access_token() -> Result<String, String> {
     let seconds = field(&response, "expires_in").and_then(|v| v.as_f64().or_else(|| v.as_string().and_then(|s| s.parse().ok()))).unwrap_or(3000.0);
     let expires_at_ms = js_sys::Date::now() + seconds * 1000.0;
     TOKEN.with(|t| *t.borrow_mut() = Some(Token { value: value.clone(), expires_at_ms }));
+    remember_user(&value).await;
+    store_session();
     Ok(value)
 }
 
