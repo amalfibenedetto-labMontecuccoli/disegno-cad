@@ -117,6 +117,9 @@ pub struct UiState {
     pub teacher_email: String,
     #[serde(skip)]
     pub send_error: String,
+    /// The drawing just saved for hand-in (file name, Drive link), shown in its dialog.
+    #[serde(skip)]
+    pub share_link: Option<(String, String)>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -191,6 +194,7 @@ impl Default for UiState {
             last_lisp_dir: None,
             teacher_email: String::new(),
             send_error: String::new(),
+            share_link: None,
         }
     }
 }
@@ -216,6 +220,10 @@ pub struct Services {
     pub send_to_teacher: Option<Box<dyn Fn(Option<&str>)>>,
     /// The only email domain "Send to teacher" accepts (the school's), when set.
     pub teacher_domain: Option<String>,
+    /// "Save and copy link": called with `true` just before the drawing is saved and with
+    /// `false` right after, so the host can make a link to the saved file and report it back
+    /// with [`CadApp::show_share_link`].
+    pub share_link: Option<Box<dyn Fn(bool)>>,
 }
 
 pub struct CadApp {
@@ -449,6 +457,13 @@ impl CadApp {
         if let Some(email) = v.get("teacherEmail").and_then(Value::as_str).filter(|e| e.chars().count() <= 254) {
             self.ui.teacher_email = email.to_string();
         }
+    }
+
+    /// The host made a link to the drawing it just saved: show it, ready to copy and paste into
+    /// the assignment.
+    pub fn show_share_link(&mut self, name: &str, link: &str) {
+        self.ui.share_link = Some((name.to_string(), link.to_string()));
+        self.ui.dialog = Some("sharelink".into());
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {

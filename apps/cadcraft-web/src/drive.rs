@@ -43,36 +43,94 @@ struct Token {
     expires_at_ms: f64,
 }
 
-thread_local! {
-    static TOKEN: RefCell<Option<Token>> = const { RefCell::new(None) };
-    /// Set while the "Send to teacher" button saves the drawing: the file [`deliver`] gets in
-    /// that time is also shared with this address.
-    static SHARE: RefCell<Option<String>> = const { RefCell::new(None) };
+/// How the file being saved is handed in, when the Hand in button started the save.
+#[derive(Clone)]
+enum Share {
+    /// Share it with this teacher and let Drive email them.
+    Teacher(String),
+    /// Make a link anyone at the school can open, and show it to the student.
+    Link,
 }
 
-/// The classroom button's hook ([`cadcraft_ui_egui::Services::send_to_teacher`]): the teacher's
+/// A saved drawing: the token used and what Drive says about the file.
+struct Saved {
+    token: String,
+    id: String,
+    link: Option<String>,
+}
+
+thread_local! {
+    static TOKEN: RefCell<Option<Token>> = const { RefCell::new(None) };
+    /// Set while the Hand in button saves the drawing: what [`deliver`] does with the file it
+    /// gets in that time besides keeping it in Drive.
+    static SHARE: RefCell<Option<Share>> = const { RefCell::new(None) };
+    /// A link ready to show: the file name and its link, taken by the app's next frame.
+    static LINK: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// Wakes the app when the background work has something to show.
+    static CONTEXT: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
+}
+
+/// The "send to a teacher" hook ([`cadcraft_ui_egui::Services::send_to_teacher`]): the teacher's
 /// address just before the drawing is saved, `None` right after.
 pub fn request_share(teacher: Option<&str>) {
-    SHARE.with(|s| *s.borrow_mut() = teacher.map(str::to_string));
+    SHARE.with(|s| *s.borrow_mut() = teacher.map(|t| Share::Teacher(t.to_string())));
+}
+
+/// The "save and copy link" hook ([`cadcraft_ui_egui::Services::share_link`]): `true` just before
+/// the drawing is saved, `false` right after.
+pub fn request_link(on: bool) {
+    SHARE.with(|s| *s.borrow_mut() = on.then_some(Share::Link));
+}
+
+/// Called every frame with the app's egui context, so finished background work can wake it.
+pub fn remember_context(ctx: &egui::Context) {
+    CONTEXT.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.is_none() {
+            *c = Some(ctx.clone());
+        }
+    });
+}
+
+/// A link to a drawing that was just saved, if there is one: take it and show it.
+pub fn take_link() -> Option<(String, String)> {
+    LINK.with(|l| l.borrow_mut().take())
+}
+
+fn publish_link(name: &str, link: &str) {
+    LINK.with(|l| *l.borrow_mut() = Some((name.to_string(), link.to_string())));
+    CONTEXT.with(|c| {
+        if let Some(ctx) = c.borrow().as_ref() {
+            ctx.request_repaint();
+        }
+    });
 }
 
 /// The engine's delivery hook on the web ([`cadcraft_engine::cmd::file::set_deliver`]).
+/// Drawings (DXF, DWG) go to Drive; images and PDFs are downloaded so they can be dragged into
+/// the assignment.
 pub fn deliver(name: &str, mime: &str, bytes: &[u8]) -> Result<(), String> {
-    if drive_disabled() || bytes.len() > MAX_UPLOAD_BYTES {
+    if drive_disabled() || bytes.len() > MAX_UPLOAD_BYTES || !drivefmt::is_drawing(name) {
         return crate::download::download(name, mime, bytes);
     }
     let share = SHARE.with(|s| s.borrow().clone());
     let (name, mime, bytes) = (name.to_string(), mime.to_string(), bytes.to_vec());
     wasm_bindgen_futures::spawn_local(async move {
         match save(&name, &mime, &bytes).await {
-            Ok((token, id)) if share.is_some() => {
-                let teacher = share.unwrap_or_default();
-                match share_with_teacher(&token, &id, &name, &teacher).await {
+            Ok(saved) => match share {
+                Some(Share::Teacher(teacher)) => match share_with_teacher(&saved.token, &saved.id, &name, &teacher).await {
                     Ok(()) => notify(&format!("Disegno inviato a {teacher}.\nÈ anche salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
                     Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma NON è stato inviato a {teacher}: {e}")),
-                }
-            }
-            Ok(_) => notify(&format!("Salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
+                },
+                Some(Share::Link) => match link_for_school(&saved).await {
+                    Ok(link) => {
+                        copy_to_clipboard(&link);
+                        publish_link(&name, &link);
+                    }
+                    Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma non sono riuscito a fare il link: {e}")),
+                },
+                None => notify(&format!("Salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
+            },
             Err(e) => {
                 log::warn!("save to Drive failed: {e}");
                 match crate::download::download(&name, &mime, &bytes) {
@@ -96,20 +154,46 @@ fn notify(message: &str) {
     }
 }
 
+/// Try to put `text` on the clipboard. Browsers allow it only shortly after a click, so this can
+/// quietly fail; the link window has a Copy button for that.
+fn copy_to_clipboard(text: &str) {
+    let Some(window) = web_sys::window() else { return };
+    let navigator = window.navigator();
+    let navigator: &JsValue = navigator.as_ref();
+    let Some(clipboard) = field(navigator, "clipboard") else { return };
+    let Some(write) = field(&clipboard, "writeText").and_then(|f| f.dyn_into::<js_sys::Function>().ok()) else { return };
+    if let Ok(promise) = write.call1(&clipboard, &JsValue::from_str(text)) {
+        // A refusal is a rejected promise: swallow it so it doesn't surface as an error.
+        if let Ok(promise) = promise.dyn_into::<js_sys::Promise>() {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = JsFuture::from(promise).await;
+            });
+        }
+    }
+}
+
 /// Put `bytes` in the "Disegni" folder as `name`, replacing the file of that name if it is there.
-/// Returns the access token used and the id of the file in Drive.
-async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<(String, String), String> {
+async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<Saved, String> {
     let token = access_token().await?;
     let folder = find_or_create_folder(&token).await?;
     let existing = find_file(&token, &folder, name).await?;
     let (url, method, meta) = match existing {
-        Some(id) => (format!("{UPLOAD_URL}/{id}?uploadType=multipart&fields=id"), "PATCH", json!({ "name": name })),
-        None => (format!("{UPLOAD_URL}?uploadType=multipart&fields=id"), "POST", json!({ "name": name, "parents": [folder] })),
+        Some(id) => (format!("{UPLOAD_URL}/{id}?uploadType=multipart&fields=id,webViewLink"), "PATCH", json!({ "name": name })),
+        None => (format!("{UPLOAD_URL}?uploadType=multipart&fields=id,webViewLink"), "POST", json!({ "name": name, "parents": [folder] })),
     };
     let (content_type, body) = drivefmt::multipart(&meta, mime, bytes);
     let answer = request(&token, method, &url, Some(&content_type), Some(body)).await?;
     let id = drivefmt::created_id(&answer).ok_or_else(|| "Drive non ha restituito il file salvato".to_string())?;
-    Ok((token, id))
+    Ok(Saved { token, id, link: drivefmt::web_link(&answer) })
+}
+
+/// Let everyone at the school open the file through its link (not search for it, not outside the
+/// school), and return that link. A pasted link to a private file would not open for the teacher.
+async fn link_for_school(saved: &Saved) -> Result<String, String> {
+    let url = format!("{FILES_URL}/{}/permissions?fields=id", saved.id);
+    let body = json!({ "type": "domain", "role": "reader", "domain": SCHOOL_DOMAIN, "allowFileDiscovery": false });
+    request(&saved.token, "POST", &url, Some("application/json"), Some(body.to_string().into_bytes())).await?;
+    saved.link.clone().ok_or_else(|| "Drive non ha dato il link del file".to_string())
 }
 
 /// Share the saved file with the teacher at `teacher` (read-only; Drive emails them).

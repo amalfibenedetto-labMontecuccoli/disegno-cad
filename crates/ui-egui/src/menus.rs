@@ -70,7 +70,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.cmdline.clear", "Clear Command History", &[], None),
     ("ui.dialog.language", "Interface Language", &["Edit", "Interface Language"], None),
     ("ui.language", "Language", &[], None),
-    ("ui.sendteacher", "Send to teacher", &["File", "Send to teacher"], None),
+    ("ui.sendteacher", "Hand in", &["File", "Hand in"], None),
+    ("ui.sharelink", "Save and copy link", &[], None),
     ("ui.noop", "", &[], None),
     ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
 ];
@@ -263,7 +264,19 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         // Save the drawing and hand the saved file to the teacher (the host does the sending).
-        // From the tool bar or a menu (no parameters) it asks for the teacher's address; with
+        // Save the drawing and have the host make a link to it ([`CadApp::show_share_link`]).
+        "ui.sharelink" => {
+            let Some(share) = &app.services.share_link else {
+                return Some(Err("Hand in is not available here".to_string()));
+            };
+            share(true);
+            app.start("qsave");
+            if let Some(share) = &app.services.share_link {
+                share(false);
+            }
+            Ok(Value::Null)
+        }
+        // From the tool bar or a menu (no parameters) it asks how to hand in; with
         // `{"email": …}` it saves the drawing and the host passes the file on to that address.
         "ui.sendteacher" => {
             if app.services.send_to_teacher.is_none() {

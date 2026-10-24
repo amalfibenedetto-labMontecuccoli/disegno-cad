@@ -47,6 +47,10 @@ mod web {
         /// document title when it changed (so the tab and an embedding page name the open
         /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            crate::drive::remember_context(ctx);
+            if let Some((name, link)) = crate::drive::take_link() {
+                self.0.show_share_link(&name, &link);
+            }
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
@@ -106,6 +110,7 @@ mod web {
             // The school build: 2D only, with the "Send to teacher" button (`drive.rs`).
             school_mode: true,
             send_to_teacher: Some(Box::new(crate::drive::request_share)),
+            share_link: Some(Box::new(crate::drive::request_link)),
             teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
             ..Services::default()
         }

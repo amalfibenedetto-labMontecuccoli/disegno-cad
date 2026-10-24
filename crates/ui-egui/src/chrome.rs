@@ -189,7 +189,7 @@ fn send_button(ui: &mut egui::Ui, row: Rect) -> bool {
     let fill = if resp.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
     ui.painter().rect_filled(rect, 6.0, fill);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(16.0, 16.0)), Icon::Share, false);
-    let label = crate::i18n::t("Send to teacher").to_string();
+    let label = crate::i18n::t("Hand in").to_string();
     ui.painter().text(pos2(rect.left() + 34.0, rect.center().y), egui::Align2::LEFT_CENTER, &label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
     icons::describe_control(ui, &resp, &label, None, false);
     resp.on_hover_text(label).clicked()

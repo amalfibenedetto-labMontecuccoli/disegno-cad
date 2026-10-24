@@ -46,6 +46,17 @@ pub fn created_id(answer: &Value) -> Option<String> {
     answer.get("id")?.as_str().map(str::to_string)
 }
 
+/// The link that opens a file in the browser, in an answer asked for `webViewLink`.
+pub fn web_link(answer: &Value) -> Option<String> {
+    answer.get("webViewLink")?.as_str().filter(|l| l.starts_with("https://")).map(str::to_string)
+}
+
+/// Whether `name` is a drawing file (kept in Drive); images and PDFs are downloaded instead.
+pub fn is_drawing(name: &str) -> bool {
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    matches!(extension.as_deref(), Some("dxf" | "dwg"))
+}
+
 /// The text of the email Drive sends the teacher with the shared drawing.
 pub fn share_message(student: &str, file: &str) -> String {
     if student.trim().is_empty() {
@@ -112,5 +123,20 @@ mod tests {
         assert_eq!(share_message("  ", "stella.dxf"), "Disegno inviato da un alunno: stella.dxf");
         assert_eq!(user_name(&json!({"user": {"displayName": "Mario Rossi"}})).as_deref(), Some("Mario Rossi"));
         assert_eq!(user_name(&json!({})), None);
+    }
+
+    /// Guards what goes to Drive: only drawings (any letter case); images, PDFs and names
+    /// without an extension are downloaded so they can be dragged into the assignment.
+    #[test]
+    fn only_drawings_go_to_drive_and_links_must_be_https() {
+        assert!(is_drawing("stella.dxf"));
+        assert!(is_drawing("STELLA.DWG"));
+        assert!(!is_drawing("stella.png"));
+        assert!(!is_drawing("stella.pdf"));
+        assert!(!is_drawing("stella"));
+        assert!(!is_drawing("dxf"));
+        assert_eq!(web_link(&json!({"webViewLink": "https://drive.google.com/file/d/x/view"})).as_deref(), Some("https://drive.google.com/file/d/x/view"));
+        assert_eq!(web_link(&json!({"webViewLink": "javascript:alert(1)"})), None);
+        assert_eq!(web_link(&json!({})), None);
     }
 }
