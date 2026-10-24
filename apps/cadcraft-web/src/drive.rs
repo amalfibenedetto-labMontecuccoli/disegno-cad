@@ -8,7 +8,7 @@
 //! `deliver` returns at once, so the engine counts the drawing as saved while the upload runs in
 //! the background; the fallback download and the messages keep that honest.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use serde_json::{Value, json};
 use wasm_bindgen::closure::Closure;
@@ -29,8 +29,8 @@ const GIS_URL: &str = "https://accounts.google.com/gsi/client";
 const FOLDER_NAME: &str = "Disegni";
 const DRIVE_URL: &str = "https://www.googleapis.com/drive/v3";
 const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
-/// Who the "Send to teacher" button sends to; edited on GitHub, no rebuild of the code needed.
-const TEACHERS_FILE: &str = "docenti.json";
+/// The only email domain a drawing may be sent to: the school's.
+pub const SCHOOL_DOMAIN: &str = DOMAIN_HINT;
 const UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files";
 /// Drive's simple multipart upload is meant for files up to 5 MB; bigger ones are downloaded.
 const MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
@@ -46,14 +46,14 @@ struct Token {
 thread_local! {
     static TOKEN: RefCell<Option<Token>> = const { RefCell::new(None) };
     /// Set while the "Send to teacher" button saves the drawing: the file [`deliver`] gets in
-    /// that time is also shared with the teachers.
-    static SHARE: Cell<bool> = const { Cell::new(false) };
+    /// that time is also shared with this address.
+    static SHARE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// The classroom button's hook ([`cadcraft_ui_egui::Services::send_to_teacher`]): `true` just
-/// before the drawing is saved, `false` right after.
-pub fn request_share(on: bool) {
-    SHARE.with(|s| s.set(on));
+/// The classroom button's hook ([`cadcraft_ui_egui::Services::send_to_teacher`]): the teacher's
+/// address just before the drawing is saved, `None` right after.
+pub fn request_share(teacher: Option<&str>) {
+    SHARE.with(|s| *s.borrow_mut() = teacher.map(str::to_string));
 }
 
 /// The engine's delivery hook on the web ([`cadcraft_engine::cmd::file::set_deliver`]).
@@ -61,14 +61,17 @@ pub fn deliver(name: &str, mime: &str, bytes: &[u8]) -> Result<(), String> {
     if drive_disabled() || bytes.len() > MAX_UPLOAD_BYTES {
         return crate::download::download(name, mime, bytes);
     }
-    let share = SHARE.with(|s| s.get());
+    let share = SHARE.with(|s| s.borrow().clone());
     let (name, mime, bytes) = (name.to_string(), mime.to_string(), bytes.to_vec());
     wasm_bindgen_futures::spawn_local(async move {
         match save(&name, &mime, &bytes).await {
-            Ok((token, id)) if share => match share_with_teachers(&token, &id, &name).await {
-                Ok(teachers) => notify(&format!("Disegno inviato a {teachers}.\nÈ anche salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
-                Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma NON è stato inviato al docente: {e}")),
-            },
+            Ok((token, id)) if share.is_some() => {
+                let teacher = share.unwrap_or_default();
+                match share_with_teacher(&token, &id, &name, &teacher).await {
+                    Ok(()) => notify(&format!("Disegno inviato a {teacher}.\nÈ anche salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
+                    Err(e) => notify(&format!("Il disegno è salvato nel tuo Drive ma NON è stato inviato a {teacher}: {e}")),
+                }
+            }
             Ok(_) => notify(&format!("Salvato nel tuo Google Drive, cartella «{FOLDER_NAME}»: {name}")),
             Err(e) => {
                 log::warn!("save to Drive failed: {e}");
@@ -109,43 +112,17 @@ async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<(String, String), 
     Ok((token, id))
 }
 
-/// Share the saved file with every teacher in `docenti.json` (read-only; Drive emails them).
-/// Returns the teachers' names for the message to the student.
-async fn share_with_teachers(token: &str, file_id: &str, file_name: &str) -> Result<String, String> {
-    let teachers = load_teachers().await?;
-    if teachers.is_empty() {
-        return Err("nessun docente è configurato (file docenti.json)".to_string());
-    }
+/// Share the saved file with the teacher at `teacher` (read-only; Drive emails them).
+async fn share_with_teacher(token: &str, file_id: &str, file_name: &str, teacher: &str) -> Result<(), String> {
     let student = request(token, "GET", &format!("{DRIVE_URL}/about?fields=user(displayName)"), None, None)
         .await
         .ok()
         .and_then(|answer| drivefmt::user_name(&answer))
         .unwrap_or_default();
     let message = encode(&drivefmt::share_message(&student, file_name));
-    for teacher in &teachers {
-        let url = format!("{FILES_URL}/{file_id}/permissions?sendNotificationEmail=true&emailMessage={message}&fields=id");
-        let body = json!({ "type": "user", "role": "reader", "emailAddress": teacher.email });
-        request(token, "POST", &url, Some("application/json"), Some(body.to_string().into_bytes()))
-            .await
-            .map_err(|e| format!("condivisione con {} non riuscita ({e})", teacher.name))?;
-    }
-    Ok(teachers.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "))
-}
-
-/// The teachers in `docenti.json`, which sits next to the page.
-async fn load_teachers() -> Result<Vec<drivefmt::Teacher>, String> {
-    let window = web_sys::window().ok_or("nessuna finestra del browser")?;
-    let response = JsFuture::from(window.fetch_with_str(TEACHERS_FILE))
-        .await
-        .map_err(js_error)?
-        .dyn_into::<web_sys::Response>()
-        .map_err(|_| "risposta non valida".to_string())?;
-    if !response.ok() {
-        return Err(format!("non trovo {TEACHERS_FILE} ({})", response.status()));
-    }
-    let text = JsFuture::from(response.text().map_err(js_error)?).await.map_err(js_error)?.as_string().unwrap_or_default();
-    let json: Value = serde_json::from_str(&text).map_err(|e| format!("{TEACHERS_FILE} non è leggibile: {e}"))?;
-    Ok(drivefmt::parse_teachers(&json))
+    let url = format!("{FILES_URL}/{file_id}/permissions?sendNotificationEmail=true&emailMessage={message}&fields=id");
+    let body = json!({ "type": "user", "role": "reader", "emailAddress": teacher });
+    request(token, "POST", &url, Some("application/json"), Some(body.to_string().into_bytes())).await.map(|_| ())
 }
 
 async fn find_or_create_folder(token: &str) -> Result<String, String> {

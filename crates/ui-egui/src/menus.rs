@@ -263,15 +263,31 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         // Save the drawing and hand the saved file to the teacher (the host does the sending).
+        // From the tool bar or a menu (no parameters) it asks for the teacher's address; with
+        // `{"email": …}` it saves the drawing and the host passes the file on to that address.
         "ui.sendteacher" => {
-            if let Some(send) = &app.services.send_to_teacher {
-                send(true);
-            } else {
+            if app.services.send_to_teacher.is_none() {
                 return Some(Err("Send to teacher is not available here".to_string()));
+            }
+            if params.is_null() {
+                app.ui.send_error.clear();
+                app.ui.dialog = Some("sendteacher".into());
+                return Some(Ok(Value::Null));
+            }
+            let Some(email) = params.get("email").and_then(Value::as_str) else {
+                return Some(Err("ui.sendteacher needs an \"email\"".to_string()));
+            };
+            let email = match crate::teacher::check(email, app.services.teacher_domain.as_deref()) {
+                Ok(email) => email,
+                Err(e) => return Some(Err(e)),
+            };
+            app.ui.teacher_email = email.clone();
+            if let Some(send) = &app.services.send_to_teacher {
+                send(Some(&email));
             }
             app.start("qsave");
             if let Some(send) = &app.services.send_to_teacher {
-                send(false);
+                send(None);
             }
             Ok(Value::Null)
         }

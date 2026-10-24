@@ -106,6 +106,7 @@ mod web {
             // The school build: 2D only, with the "Send to teacher" button (`drive.rs`).
             school_mode: true,
             send_to_teacher: Some(Box::new(crate::drive::request_share)),
+            teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
             ..Services::default()
         }
     }

@@ -20,6 +20,7 @@ pub mod cmdline;
 pub mod context_menu;
 pub mod control;
 pub mod credits;
+pub mod teacher;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
@@ -111,6 +112,11 @@ pub struct UiState {
     pub recent_files: Vec<String>,
     /// The folder the last APPLOAD file came from: the next pick starts there.
     pub last_lisp_dir: Option<String>,
+    /// The classroom build's "Send to teacher": the address last used, and what was wrong with
+    /// the one just typed.
+    pub teacher_email: String,
+    #[serde(skip)]
+    pub send_error: String,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -183,6 +189,8 @@ impl Default for UiState {
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
             last_lisp_dir: None,
+            teacher_email: String::new(),
+            send_error: String::new(),
         }
     }
 }
@@ -202,9 +210,12 @@ pub struct Services {
     /// Classroom build: a plain 2D workspace for young students. It hides the Modeling tool
     /// set and the ViewCube and adds the always-visible "Send to teacher" button to the tool bar.
     pub school_mode: bool,
-    /// "Send to teacher": called with `true` just before the drawing is saved and with `false`
-    /// right after, so the host can pass the saved file on to the teacher when it delivers it.
-    pub send_to_teacher: Option<Box<dyn Fn(bool)>>,
+    /// "Send to teacher": called with the teacher's address just before the drawing is saved and
+    /// with `None` right after, so the host can pass the saved file on to that address when it
+    /// delivers it.
+    pub send_to_teacher: Option<Box<dyn Fn(Option<&str>)>>,
+    /// The only email domain "Send to teacher" accepts (the school's), when set.
+    pub teacher_domain: Option<String>,
 }
 
 pub struct CadApp {
@@ -402,6 +413,9 @@ impl CadApp {
         if let Some(dir) = &self.ui.last_lisp_dir {
             prefs["lispDir"] = json!(dir);
         }
+        if !self.ui.teacher_email.is_empty() {
+            prefs["teacherEmail"] = json!(self.ui.teacher_email);
+        }
         prefs.to_string()
     }
 
@@ -431,6 +445,9 @@ impl CadApp {
         }
         if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
             self.ui.last_lisp_dir = Some(dir.to_string());
+        }
+        if let Some(email) = v.get("teacherEmail").and_then(Value::as_str).filter(|e| e.chars().count() <= 254) {
+            self.ui.teacher_email = email.to_string();
         }
     }
 
