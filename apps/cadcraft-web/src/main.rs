@@ -3,14 +3,20 @@
 //! Runs the same [`cadcraft_ui_egui::CadApp`] as the desktop app through eframe's web runner
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
 //! directory (output in `dist/web`). URL flags: `?webgl` forces WebGL2, `?cpu` draws the drawing
-//! with egui shapes instead of the GPU canvas, `?sample` opens the sample drawing. Saving downloads
-//! the drawing through the browser (`download.rs`). With `?host=parent` (inside an `<iframe>`), a
+//! with egui shapes instead of the GPU canvas, `?sample` opens the sample drawing, `?nodrive` saves
+//! by plain download. Saving puts the drawing in the user's Google Drive (`drive.rs`) and falls
+//! back to a browser download (`download.rs`) when that fails. With `?host=parent` (inside an `<iframe>`), a
 //! same-origin parent page sends the drawing to open and stores what CADCraft saves instead
 //! (`host.rs`).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
 pub mod download;
+#[cfg(target_arch = "wasm32")]
+mod drive;
+#[cfg(any(target_arch = "wasm32", test))]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod drivefmt;
 #[cfg(target_arch = "wasm32")]
 mod host;
 
@@ -121,7 +127,7 @@ mod web {
                 bridge.install();
                 cadcraft_engine::cmd::file::set_deliver(crate::host::deliver);
             }
-            None => cadcraft_engine::cmd::file::set_deliver(crate::download::download),
+            None => cadcraft_engine::cmd::file::set_deliver(crate::drive::deliver),
         }
         let app_bridge = bridge.clone();
         wasm_bindgen_futures::spawn_local(async move {
