@@ -46,7 +46,14 @@ mod web {
         /// uploads, follows the browser's reduced-motion setting, runs the app, writes the browser
         /// document title when it changed (so the tab and an embedding page name the open
         /// drawing), and reports unsaved changes to that page.
-        fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+            // After a sign-out the browser keeps nothing of the student that just left.
+            if crate::drive::take_flush()
+                && let Some(storage) = frame.storage_mut()
+            {
+                self.save(storage);
+                storage.flush();
+            }
             crate::drive::remember_context(ctx);
             UNSAVED.with(|u| u.set(self.0.session.docs.iter().any(|d| d.is_dirty())));
             if let Some((name, link, folder)) = crate::drive::take_link() {
@@ -113,7 +120,7 @@ mod web {
             send_to_teacher: Some(Box::new(crate::drive::request_share)),
             share_link: Some(Box::new(crate::drive::request_link)),
             sign_in: Some(Box::new(crate::drive::sign_in)),
-            sign_out: Some(Box::new(crate::drive::sign_out)),
+            sign_out: Some(Box::new(sign_out_hook)),
             account: Some(Box::new(crate::drive::account)),
             needs_sign_in: Some(Box::new(crate::drive::needs_sign_in)),
             teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
@@ -141,6 +148,21 @@ mod web {
             // The listener lives as long as the page.
             guard.forget();
         }
+    }
+
+    /// The Sign out button: ask before dropping a drawing with unsaved changes, then forget the
+    /// account. `false` when the student chose to stay.
+    fn sign_out_hook() -> bool {
+        if UNSAVED.with(std::cell::Cell::get) {
+            let leave = web_sys::window()
+                .and_then(|w| w.confirm_with_message("Ci sono modifiche non salvate. Se esci, il disegno va perso. Vuoi uscire lo stesso?").ok())
+                .unwrap_or(true);
+            if !leave {
+                return false;
+            }
+        }
+        crate::drive::sign_out();
+        true
     }
 
     pub fn start() {

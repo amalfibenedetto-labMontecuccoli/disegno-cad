@@ -231,8 +231,8 @@ pub struct Services {
     pub share_link: Option<Box<dyn Fn(bool)>>,
     /// Start the sign-in with the school's Google account.
     pub sign_in: Option<Box<dyn Fn()>>,
-    /// Forget the signed-in account.
-    pub sign_out: Option<Box<dyn Fn()>>,
+    /// Forget the signed-in account; `false` when the student chose to stay (unsaved drawing).
+    pub sign_out: Option<Box<dyn Fn() -> bool>>,
     /// The signed-in student's name, `None` when nobody is signed in.
     pub account: Option<Box<dyn Fn() -> Option<String>>>,
     /// Whether a student must still sign in before drawing: while it is `true` a full-screen
@@ -487,6 +487,43 @@ impl CadApp {
     /// Whether the sign-in cover is up: the student has to sign in before drawing.
     pub fn gated(&self) -> bool {
         self.services.needs_sign_in.as_ref().is_some_and(|needs| needs())
+    }
+
+    /// Put the interface back as it starts, without touching the drawings: panels, tools shown,
+    /// colours and scale, and (in the classroom build) Simple mode with its snaps and grid.
+    pub fn reset_ui(&mut self) {
+        self.ui.hidden_tools.clear();
+        self.ui.collapsed_groups.clear();
+        self.ui.show_toolsets = true;
+        self.ui.show_palettes = true;
+        self.ui.show_toolbar = true;
+        self.ui.show_file_tabs = true;
+        self.ui.show_status_bar = true;
+        self.ui.show_command_line = true;
+        self.ui.show_viewcube = true;
+        self.ui.show_ucs_icon = true;
+        self.ui.toolset_tab = "Drafting".into();
+        self.ui.dialog = None;
+        self.options = options::UiOptions::default();
+        let _ = docking::command(self, true, &json!({}));
+        if self.services.school_mode {
+            self.ui.simple_mode = true;
+            self.apply_simple_defaults();
+        }
+        self.set_status(crate::tl!("Settings restored"));
+    }
+
+    /// The student signed out: close their drawings, start an empty one, forget what was typed
+    /// and remembered for them, and put the interface back as it starts.
+    pub fn forget_student(&mut self) {
+        self.ui.teacher_email.clear();
+        self.ui.send_error.clear();
+        self.ui.share_link = None;
+        self.ui.recent_files.clear();
+        let _ = self.run("closeall", json!({}));
+        let _ = self.run("new", json!({}));
+        self.ui.start_tab = false;
+        self.reset_ui();
     }
 
     /// Whether the classroom build is in its Simple mode.

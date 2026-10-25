@@ -92,6 +92,7 @@ pub const SIMPLE_MENU_ITEMS: &[&str] = &[
     "ui.dialog.about",
     "ui.dialog.commands",
     "ui.sample",
+    "ui.reset",
 ];
 
 /// Whether Simple mode shows the Tool Sets tool `cmd`.

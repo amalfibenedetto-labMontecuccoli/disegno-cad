@@ -74,6 +74,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.sharelink", "Save and copy link", &[], None),
     ("ui.mode.simple", "Simple mode", &["View", "Simple mode"], None),
     ("ui.mode.normal", "Normal mode", &["View", "Normal mode"], None),
+    ("ui.reset", "Reset settings", &["View", "Reset settings"], None),
     ("ui.signin", "Sign in with Google", &[], None),
     ("ui.signout", "Sign out", &[], None),
     ("ui.noop", "", &[], None),
@@ -278,15 +279,28 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             app.ui.simple_mode = false;
             Ok(Value::Null)
         }
-        "ui.signin" | "ui.signout" => {
-            let hook = if id == "ui.signin" { &app.services.sign_in } else { &app.services.sign_out };
-            match hook {
-                Some(hook) => {
-                    hook();
-                    Ok(Value::Null)
-                }
-                None => Err("Signing in is not available here".to_string()),
+        "ui.signin" => match &app.services.sign_in {
+            Some(sign_in) => {
+                sign_in();
+                Ok(Value::Null)
             }
+            None => Err("Signing in is not available here".to_string()),
+        },
+        // Signing out leaves the computer clean for the next student, unless they keep an unsaved
+        // drawing (the host asks).
+        "ui.signout" => {
+            let Some(sign_out) = &app.services.sign_out else {
+                return Some(Err("Signing in is not available here".to_string()));
+            };
+            if sign_out() {
+                app.forget_student();
+            }
+            Ok(Value::Null)
+        }
+        // Interface back to how it starts; the drawings stay.
+        "ui.reset" => {
+            app.reset_ui();
+            Ok(Value::Null)
         }
         // Save the drawing and have the host make a link to it ([`CadApp::show_share_link`]).
         "ui.sharelink" => {

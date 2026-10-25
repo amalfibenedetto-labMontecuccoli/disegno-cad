@@ -106,6 +106,10 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                     app.start(if to_simple { "ui.mode.simple" } else { "ui.mode.normal" });
                 }
                 right -= MODE_W + 10.0;
+                if reset_button(ui, row, right) {
+                    app.start("ui.reset");
+                }
+                right -= RESET_W + 10.0;
                 let account = app.services.account.as_ref().and_then(|name| name());
                 match account_widget(ui, row, right, account.as_deref()) {
                     Some(AccountClick::SignIn) => app.start("ui.signin"),
@@ -209,6 +213,8 @@ fn toolbar_groups(simple: bool) -> Vec<Vec<ToolbarItem>> {
 const SEND_BUTTON_W: f32 = 150.0;
 /// Width of the Simple / Normal switch.
 const MODE_W: f32 = 150.0;
+/// Width of the Reset button.
+const RESET_W: f32 = 96.0;
 /// Width of the account button.
 const ACCOUNT_W: f32 = 170.0;
 
@@ -244,6 +250,21 @@ fn mode_switch(ui: &mut egui::Ui, row: Rect, right: f32, simple: bool) -> Option
         }
     }
     chosen
+}
+
+/// The Reset button left of the mode switch: panels, tools and snaps back as they start (the
+/// drawing stays); true when clicked.
+fn reset_button(ui: &mut egui::Ui, row: Rect, right: f32) -> bool {
+    let t = Tokens::get();
+    let rect = Rect::from_min_size(pos2(right - RESET_W, row.center().y - 13.0), vec2(RESET_W, 26.0));
+    let resp = ui.interact(rect, ui.id().with("reset_ui"), Sense::click());
+    ui.painter().rect_filled(rect, 5.0, if resp.hovered() { t.control_hover } else { t.chrome_dark });
+    ui.painter().rect_stroke(rect, 5.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let label = crate::i18n::t("Reset").to_string();
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(13.0), t.text);
+    let tip = crate::i18n::t("Reset settings").to_string();
+    icons::describe_control(ui, &resp, &tip, None, false);
+    resp.on_hover_text(tip).clicked()
 }
 
 /// The account button left of the mode switch: "Sign in with Google", or the student's name with

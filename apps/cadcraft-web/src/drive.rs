@@ -71,6 +71,8 @@ thread_local! {
     static LINK: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
     /// The signed-in student's name.
     static USER: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Set at sign-out: the app saves its remembered settings to the browser at once.
+    static FLUSH: Cell<bool> = const { Cell::new(false) };
     /// Whether the sign-in kept in this browser tab was already looked for.
     static RESTORED: Cell<bool> = const { Cell::new(false) };
     /// Wakes the app when the background work has something to show.
@@ -190,7 +192,13 @@ pub fn sign_out() {
     if let Some(storage) = session_storage() {
         let _ = storage.remove_item(SESSION_KEY);
     }
+    FLUSH.with(|f| f.set(true));
     wake();
+}
+
+/// Whether the app should save its remembered settings now (after a sign-out), once.
+pub fn take_flush() -> bool {
+    FLUSH.with(|f| f.replace(false))
 }
 
 /// The student's name from Drive, kept for the toolbar.
