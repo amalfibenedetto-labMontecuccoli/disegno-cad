@@ -71,6 +71,10 @@ thread_local! {
     static LINK: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
     /// The signed-in student's name.
     static USER: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// A note for the status bar (what the autosave just did), taken by the app's next frame.
+    static NOTICE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Whether an autosave is on its way to Drive.
+    static AUTOSAVING: Cell<bool> = const { Cell::new(false) };
     /// Set at sign-out: the app saves its remembered settings to the browser at once.
     static FLUSH: Cell<bool> = const { Cell::new(false) };
     /// Whether the sign-in kept in this browser tab was already looked for.
@@ -158,6 +162,48 @@ pub fn account() -> Option<String> {
         return None;
     }
     Some(USER.with(|u| u.borrow().clone()).unwrap_or_else(|| "Google".to_string()))
+}
+
+/// The access token while it is still good, without ever asking Google (no popup).
+fn valid_token() -> Option<String> {
+    restore_session();
+    let now = js_sys::Date::now();
+    TOKEN.with(|t| t.borrow().as_ref().filter(|t| t.expires_at_ms - TOKEN_MARGIN_MS > now).map(|t| t.value.clone()))
+}
+
+/// What the autosave has to tell the student, if anything: take it and show it.
+pub fn take_notice() -> Option<String> {
+    NOTICE.with(|n| n.borrow_mut().take())
+}
+
+/// Whether an autosave can go to Drive now: a student is signed in with a valid access (an
+/// autosave never opens Google's popup), and the last one has finished.
+pub fn can_autosave() -> bool {
+    !drive_disabled() && valid_token().is_some() && !AUTOSAVING.with(Cell::get)
+}
+
+/// Keep `bytes` in Drive as the autosaved copy called `name` (in the "Disegni" folder, replacing
+/// the last autosave of that name). Quiet: a failure only goes to the log, and the status bar
+/// tells when one worked.
+pub fn autosave(name: String, bytes: Vec<u8>) {
+    if bytes.len() > MAX_UPLOAD_BYTES {
+        return;
+    }
+    let Some(token) = valid_token() else { return };
+    AUTOSAVING.with(|a| a.set(true));
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = save_with_token(token, &name, "application/dxf", &bytes).await;
+        AUTOSAVING.with(|a| a.set(false));
+        match result {
+            Ok(_) => {
+                let now = js_sys::Date::new_0();
+                let note = format!("Salvataggio automatico nel Drive alle {:02}:{:02}", now.get_hours(), now.get_minutes());
+                NOTICE.with(|n| *n.borrow_mut() = Some(note));
+                wake();
+            }
+            Err(e) => log::warn!("autosave to Drive failed: {e}"),
+        }
+    });
 }
 
 /// Whether the student still has to sign in before drawing. A student who signed in stays past
@@ -280,6 +326,11 @@ fn copy_to_clipboard(text: &str) {
 /// Put `bytes` in the "Disegni" folder as `name`, replacing the file of that name if it is there.
 async fn save(name: &str, mime: &str, bytes: &[u8]) -> Result<Saved, String> {
     let token = access_token().await?;
+    save_with_token(token, name, mime, bytes).await
+}
+
+/// [`save`] with the access token already in hand.
+async fn save_with_token(token: String, name: &str, mime: &str, bytes: &[u8]) -> Result<Saved, String> {
     let folder = find_or_create_folder(&token).await?;
     let existing = find_file(&token, &folder, name).await?;
     let (url, method, meta) = match existing {

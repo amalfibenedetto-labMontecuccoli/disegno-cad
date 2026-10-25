@@ -46,6 +46,18 @@ pub fn created_id(answer: &Value) -> Option<String> {
     answer.get("id")?.as_str().map(str::to_string)
 }
 
+/// The name of the Drive file that keeps the autosaved copy of the drawing called `title`:
+/// "Autosalvataggio - <title>.dxf". It is never the drawing's own name, so an autosave can't
+/// overwrite what the student saved themselves.
+pub fn autosave_name(title: &str) -> String {
+    let trimmed = title.trim();
+    let lower = trimmed.to_lowercase();
+    let stem = if lower.ends_with(".dxf") || lower.ends_with(".dwg") { trimmed.get(..trimmed.len().saturating_sub(4)).unwrap_or(trimmed) } else { trimmed };
+    let clean: String = stem.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '_' } else { c }).take(80).collect();
+    let clean = clean.trim();
+    format!("Autosalvataggio - {}.dxf", if clean.is_empty() { "Disegno" } else { clean })
+}
+
 /// The link that opens a file in the browser, in an answer asked for `webViewLink`.
 pub fn web_link(answer: &Value) -> Option<String> {
     answer.get("webViewLink")?.as_str().filter(|l| l.starts_with("https://")).map(str::to_string)
@@ -138,5 +150,18 @@ mod tests {
         assert_eq!(web_link(&json!({"webViewLink": "https://drive.google.com/file/d/x/view"})).as_deref(), Some("https://drive.google.com/file/d/x/view"));
         assert_eq!(web_link(&json!({"webViewLink": "javascript:alert(1)"})), None);
         assert_eq!(web_link(&json!({})), None);
+    }
+
+    /// Guards the autosave name: it never equals the drawing's own file name (so it can't overwrite
+    /// the student's saved work), drops the extension, and is safe as a Drive file name.
+    #[test]
+    fn autosave_names_never_collide_with_the_drawing_file() {
+        assert_eq!(autosave_name("Drawing2"), "Autosalvataggio - Drawing2.dxf");
+        assert_eq!(autosave_name("stella.dxf"), "Autosalvataggio - stella.dxf");
+        assert_eq!(autosave_name("STELLA.DWG"), "Autosalvataggio - STELLA.dxf");
+        assert_eq!(autosave_name("  "), "Autosalvataggio - Disegno.dxf");
+        assert_eq!(autosave_name("a/b:c"), "Autosalvataggio - a_b_c.dxf");
+        assert_ne!(autosave_name("stella.dxf"), "stella.dxf");
+        assert!(autosave_name(&"x".repeat(500)).chars().count() < 120);
     }
 }

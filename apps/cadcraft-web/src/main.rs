@@ -56,6 +56,10 @@ mod web {
             }
             crate::drive::remember_context(ctx);
             UNSAVED.with(|u| u.set(self.0.session.docs.iter().any(|d| d.is_dirty())));
+            autosave_tick(&self.0, ctx);
+            if let Some(note) = crate::drive::take_notice() {
+                self.0.set_status(note);
+            }
             if let Some((name, link, folder)) = crate::drive::take_link() {
                 self.0.show_share_link(&name, &link, &folder);
             }
@@ -131,6 +135,42 @@ mod web {
     thread_local! {
         /// Whether a drawing has unsaved changes, for the browser's "leave this page?" question.
         static UNSAVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// How often a drawing with unsaved changes is copied to the student's Drive.
+    const AUTOSAVE_EVERY_MS: f64 = 120_000.0;
+
+    thread_local! {
+        /// When the autosave last looked (ms since 1970; 0 before the first frame).
+        static LAST_AUTOSAVE: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+    }
+
+    /// Every couple of minutes, copy each drawing with unsaved changes to the student's Drive as
+    /// "Autosalvataggio - <name>.dxf", so a forgotten Save doesn't lose the work. Only while the
+    /// student is signed in (it never opens a popup), and never over the drawing's own file.
+    fn autosave_tick(app: &CadApp, ctx: &egui::Context) {
+        // The app sleeps when nothing happens: wake it now and then to look.
+        ctx.request_repaint_after(std::time::Duration::from_secs(30));
+        let now = web_sys::js_sys::Date::now();
+        let last = LAST_AUTOSAVE.with(std::cell::Cell::get);
+        if last == 0.0 {
+            LAST_AUTOSAVE.with(|l| l.set(now));
+            return;
+        }
+        if now - last < AUTOSAVE_EVERY_MS {
+            return;
+        }
+        LAST_AUTOSAVE.with(|l| l.set(now));
+        if !crate::drive::can_autosave() {
+            return;
+        }
+        for doc in app.session.docs.iter().filter(|d| d.is_dirty()) {
+            let name = crate::drivefmt::autosave_name(&doc.title);
+            match cadcraft_io::write(doc.drawing(), &name) {
+                Ok(bytes) => crate::drive::autosave(name, bytes),
+                Err(e) => log::warn!("autosave: could not write {name}: {e}"),
+            }
+        }
     }
 
     /// Closing or reloading the tab with unsaved changes asks first, so a distracted student
