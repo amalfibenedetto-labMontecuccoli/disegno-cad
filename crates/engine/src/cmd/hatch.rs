@@ -765,6 +765,26 @@ const MAX_PAINT_POINTS: usize = 256;
 fn paint_at(s: &mut Session, q: Vec2) -> Result<Vec<Handle>> {
     let st = HatchSettings::from(s, &json!({ "pattern": "SOLID", "separate": true }), false);
     let loops = loops_at(s, q)?;
+    // A zone that is already coloured is recoloured: its old fill goes, or it would hide the new one.
+    let old: Vec<Handle> = {
+        let d = s.doc()?;
+        let space = s.space();
+        d.space(&space)
+            .map(|store| {
+                store
+                    .iter()
+                    .filter(|e| {
+                        matches!(&e.kind, EntityKind::Hatch(h) if h.solid && h.gradient.is_none() && h.loops.len() == loops.len()
+                            && h.loops.iter().zip(&loops).all(|(a, b)| same_loop(a, b)))
+                    })
+                    .map(|e| e.handle)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for h in old {
+        s.doc_mut()?.remove_entity(h);
+    }
     add_hatches(s, &st, vec![loops])
 }
 
@@ -797,7 +817,7 @@ impl Interactive for PaintM {
         "PAINT"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
-        Prompt::new("Click inside a zone to color it (Enter to finish)", Accept::POINT)
+        Prompt::new("Click inside a zone to color it (Esc to change color or finish)", Accept::POINT)
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
