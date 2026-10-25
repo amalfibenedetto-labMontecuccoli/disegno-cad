@@ -99,25 +99,37 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let simple = app.simple_ui();
             let mut right = row.right() - 8.0;
             if school {
-                if send_button(ui, row) {
-                    app.start("ui.sendteacher");
-                }
-                right -= SEND_BUTTON_W + 10.0;
-                if let Some(to_simple) = mode_switch(ui, row, right, simple) {
-                    app.start(if to_simple { "ui.mode.simple" } else { "ui.mode.normal" });
-                }
-                right -= MODE_W + 10.0;
-                if reset_button(ui, row, right) {
-                    app.start("ui.reset");
-                }
-                right -= RESET_W + 10.0;
+                // The school buttons sit near the middle of the bar, but leave room for the icons.
+                let total = ACCOUNT_W + RESET_W + MODE_W + 2.0 * DRIVE_W + SEND_BUTTON_W + 5.0 * 10.0;
+                let left = (row.center().x - total / 2.0).max(x + ICON_RESERVE).min(row.right() - 8.0 - total).max(x);
+                let mut at = left;
                 let account = app.services.account.as_ref().and_then(|name| name());
-                match account_widget(ui, row, right, account.as_deref()) {
+                match account_widget(ui, row, at + ACCOUNT_W, account.as_deref()) {
                     Some(AccountClick::SignIn) => app.start("ui.signin"),
                     Some(AccountClick::SignOut) => app.start("ui.signout"),
                     None => {}
                 }
-                right -= ACCOUNT_W + 10.0;
+                at += ACCOUNT_W + 10.0;
+                if reset_button(ui, row, at + RESET_W) {
+                    app.start("ui.reset");
+                }
+                at += RESET_W + 10.0;
+                if let Some(to_simple) = mode_switch(ui, row, at + MODE_W, simple) {
+                    app.start(if to_simple { "ui.mode.simple" } else { "ui.mode.normal" });
+                }
+                at += MODE_W + 10.0;
+                if drive_button(ui, row, at, "Open from Drive", "ui.drive.open") {
+                    app.start("ui.drive.open");
+                }
+                at += DRIVE_W + 10.0;
+                if drive_button(ui, row, at, "Save to Drive", "qsave") {
+                    app.start("qsave");
+                }
+                at += DRIVE_W + 10.0;
+                if send_button(ui, row, at) {
+                    app.start("ui.sendteacher");
+                }
+                right = left - 10.0;
             }
             let groups = toolbar_groups(simple);
             let widths: Vec<_> = groups.iter().map(|group| group.len() as f32 * (size + 6.0) - 6.0).collect();
@@ -212,6 +224,10 @@ fn toolbar_groups(simple: bool) -> Vec<Vec<ToolbarItem>> {
 
 /// Width of the classroom "Hand in" button.
 const SEND_BUTTON_W: f32 = 150.0;
+/// Width of each yellow Drive button.
+const DRIVE_W: f32 = 130.0;
+/// Room kept for the tool icons left of the school buttons.
+const ICON_RESERVE: f32 = 330.0;
 /// Width of the Simple / Normal switch.
 const MODE_W: f32 = 150.0;
 /// Width of the Reset button.
@@ -297,11 +313,23 @@ fn account_widget(ui: &mut egui::Ui, row: Rect, right: f32, name: Option<&str>) 
     }
 }
 
+/// A yellow Drive button ("Open from Drive" / "Save to Drive") whose left edge is `left`.
+fn drive_button(ui: &mut egui::Ui, row: Rect, left: f32, label: &str, id: &str) -> bool {
+    let rect = Rect::from_min_size(pos2(left, row.center().y - 14.0), vec2(DRIVE_W, 28.0));
+    let resp = ui.interact(rect, ui.id().with(("drive_button", id)), Sense::click());
+    let yellow = egui::Color32::from_rgb(250, 204, 21);
+    ui.painter().rect_filled(rect, 6.0, if resp.hovered() { yellow.gamma_multiply(0.85) } else { yellow });
+    let text = crate::i18n::t(label).to_string();
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(13.0), egui::Color32::from_rgb(40, 32, 0));
+    icons::describe_control(ui, &resp, &text, None, false);
+    resp.on_hover_text(text).clicked()
+}
+
 /// The classroom "Send to teacher" button at the right end of the tool bar row; true when it was
 /// clicked. It is a labelled button, not an icon, so a young student can find it at a glance.
-fn send_button(ui: &mut egui::Ui, row: Rect) -> bool {
+fn send_button(ui: &mut egui::Ui, row: Rect, left: f32) -> bool {
     let t = Tokens::get();
-    let rect = Rect::from_min_size(pos2(row.right() - SEND_BUTTON_W - 8.0, row.center().y - 14.0), vec2(SEND_BUTTON_W, 28.0));
+    let rect = Rect::from_min_size(pos2(left, row.center().y - 14.0), vec2(SEND_BUTTON_W, 28.0));
     let resp = ui.interact(rect, ui.id().with("send_to_teacher"), Sense::click());
     let fill = if resp.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
     ui.painter().rect_filled(rect, 6.0, fill);
