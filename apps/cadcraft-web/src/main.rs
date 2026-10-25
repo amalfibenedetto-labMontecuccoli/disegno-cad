@@ -48,6 +48,7 @@ mod web {
         /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             crate::drive::remember_context(ctx);
+            UNSAVED.with(|u| u.set(self.0.session.docs.iter().any(|d| d.is_dirty())));
             if let Some((name, link, folder)) = crate::drive::take_link() {
                 self.0.show_share_link(&name, &link, &folder);
             }
@@ -114,13 +115,37 @@ mod web {
             sign_in: Some(Box::new(crate::drive::sign_in)),
             sign_out: Some(Box::new(crate::drive::sign_out)),
             account: Some(Box::new(crate::drive::account)),
+            needs_sign_in: Some(Box::new(crate::drive::needs_sign_in)),
             teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
             ..Services::default()
         }
     }
 
+    thread_local! {
+        /// Whether a drawing has unsaved changes, for the browser's "leave this page?" question.
+        static UNSAVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Closing or reloading the tab with unsaved changes asks first, so a distracted student
+    /// doesn't lose a drawing they forgot to save.
+    fn install_unload_guard() {
+        let Some(window) = web_sys::window() else { return };
+        let guard = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(|event: web_sys::Event| {
+            if UNSAVED.with(std::cell::Cell::get) {
+                event.prevent_default();
+                // Some browsers only ask when `returnValue` is set.
+                let _ = web_sys::js_sys::Reflect::set(&event, &"returnValue".into(), &"".into());
+            }
+        });
+        if window.add_event_listener_with_callback("beforeunload", guard.as_ref().unchecked_ref()).is_ok() {
+            // The listener lives as long as the page.
+            guard.forget();
+        }
+    }
+
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
+        install_unload_guard();
         cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
             read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
             write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
@@ -182,13 +207,9 @@ mod web {
                             // viewports stay in the layout's display list.
                             app.set_wgpu(rs, None);
                         }
-                        // The classroom defaults (Simple mode: snaps and grid like squared paper), then
-                        // the sign-in window unless this tab is already signed in.
+                        // The classroom defaults (Simple mode: snaps and grid like squared paper).
                         if app.simple_ui() {
                             app.apply_simple_defaults();
-                        }
-                        if app_bridge.is_none() && !crate::drive::signed_in() {
-                            app.ui.dialog = Some("signin".into());
                         }
                         if query().contains("sample") {
                             let _ = app.run("ui.sample", serde_json::json!({}));
@@ -218,7 +239,7 @@ mod web {
                 match result {
                     Ok(()) => el.remove(),
                     Err(e) => {
-                        el.set_inner_html(&format!("<p>CADCraft failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"))
+                        el.set_inner_html(&format!("<p>Disegno CAD non si avvia: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"))
                     }
                 }
             }
@@ -238,8 +259,8 @@ fn wants_cpu(query: &str) -> bool {
 #[cfg(any(target_arch = "wasm32", test))]
 fn document_title(name: Option<&str>, dirty: bool) -> String {
     match name.filter(|n| !n.trim().is_empty()) {
-        Some(name) => format!("{name}{} — CADCraft", if dirty { " •" } else { "" }),
-        None => "CADCraft".to_string(),
+        Some(name) => format!("{name}{} — Disegno CAD", if dirty { " •" } else { "" }),
+        None => "Disegno CAD".to_string(),
     }
 }
 
@@ -304,12 +325,12 @@ mod tests {
     /// bullet; a blank or missing name leaves the app name alone and never shows a bullet.
     #[test]
     fn viewport_title_names_the_document_and_marks_unsaved_changes() {
-        assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — CADCraft");
-        assert_eq!(document_title(Some("drawing.dwg"), true), "drawing.dwg • — CADCraft");
-        assert_eq!(document_title(Some("Drawing1"), false), "Drawing1 — CADCraft");
-        assert_eq!(document_title(None, false), "CADCraft");
-        assert_eq!(document_title(None, true), "CADCraft");
-        assert_eq!(document_title(Some("   "), true), "CADCraft");
+        assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — Disegno CAD");
+        assert_eq!(document_title(Some("drawing.dwg"), true), "drawing.dwg • — Disegno CAD");
+        assert_eq!(document_title(Some("Drawing1"), false), "Drawing1 — Disegno CAD");
+        assert_eq!(document_title(None, false), "Disegno CAD");
+        assert_eq!(document_title(None, true), "Disegno CAD");
+        assert_eq!(document_title(Some("   "), true), "Disegno CAD");
     }
 
     /// Guards the change signal: a title is sent on open, rename, dirty change and close, but
@@ -317,17 +338,17 @@ mod tests {
     #[test]
     fn viewport_title_follows_open_rename_and_dirty_changes_only() {
         let mut sent = None;
-        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false).as_deref(), Some("drawing.dwg — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false).as_deref(), Some("drawing.dwg — Disegno CAD"));
         // The page already has it: send nothing.
         assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false), None);
         // Unsaved changes add the bullet.
-        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), true).as_deref(), Some("drawing.dwg • — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), true).as_deref(), Some("drawing.dwg • — Disegno CAD"));
         // A rename shows the new name.
-        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), true).as_deref(), Some("plan.dwg • — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), true).as_deref(), Some("plan.dwg • — Disegno CAD"));
         // Saving clears it again.
-        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), false).as_deref(), Some("plan.dwg — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), false).as_deref(), Some("plan.dwg — Disegno CAD"));
         // Closing the last drawing leaves the app name only.
-        assert_eq!(title_to_send(&mut sent, None, false).as_deref(), Some("CADCraft"));
+        assert_eq!(title_to_send(&mut sent, None, false).as_deref(), Some("Disegno CAD"));
         assert_eq!(title_to_send(&mut sent, None, false), None);
     }
 
@@ -345,6 +366,6 @@ mod tests {
         assert!(push_title(&mut sent, Some("drawing.dwg"), true, |title| written.push(title.to_owned())));
         // Closing the drawing writes the app name.
         assert!(push_title(&mut sent, None, false, |title| written.push(title.to_owned())));
-        assert_eq!(written, ["drawing.dwg — CADCraft", "drawing.dwg • — CADCraft", "CADCraft"]);
+        assert_eq!(written, ["drawing.dwg — Disegno CAD", "drawing.dwg • — Disegno CAD", "Disegno CAD"]);
     }
 }

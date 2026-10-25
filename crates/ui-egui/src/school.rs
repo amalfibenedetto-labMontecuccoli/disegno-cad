@@ -5,6 +5,20 @@
 
 use cadcraft_engine::snap::mode::{CEN, END, INT, MID, PER, QUA};
 
+/// The name of this version of the program.
+pub const APP_NAME: &str = "Disegno CAD";
+
+/// Who adapted CADCraft for the school, for the credits; empty until a name is filled in.
+pub const ADAPTER: &str = "";
+
+/// The school this version is for.
+pub const SCHOOL: &str = "Scuola Secondaria di I grado R. Montecuccoli, Pavullo nel Frignano";
+
+/// The credits line of the About window.
+pub fn credits_line() -> String {
+    if ADAPTER.is_empty() { format!("A cura dei docenti della {SCHOOL}.") } else { format!("A cura di {ADAPTER}, {SCHOOL}.") }
+}
+
 /// The object snaps on in Simple mode: end, middle, centre, quadrant, intersection, perpendicular.
 pub const SIMPLE_OSMODE: u32 = END | MID | CEN | QUA | INT | PER;
 

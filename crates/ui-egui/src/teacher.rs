@@ -2,10 +2,11 @@
 //! email address, and the check that address must pass. The send itself is the `ui.sendteacher`
 //! command (`menus.rs`), which saves the drawing and tells the host to pass it on to that address.
 
-use egui::vec2;
+use egui::{Rect, RichText, vec2};
 use serde_json::json;
 
 use crate::CadApp;
+use crate::theme::Tokens;
 
 /// The address in `input` lower-cased and trimmed, or why it can't be used. With `domain` set it
 /// must be an address of that domain, so a drawing never leaves the school by a typo.
@@ -137,6 +138,41 @@ pub fn link_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     if copy {
         ctx.copy_text(link);
         ctx.data_mut(|d| d.insert_temp(copied_id, true));
+    }
+}
+
+/// The classroom build's sign-in cover: until a student signs in with the school Google account,
+/// a full-screen cover with one big button sits over the whole window and swallows every click
+/// and key, so nobody starts a drawing that could be lost for want of a place to save it.
+pub fn signin_gate(app: &mut CadApp, ctx: &egui::Context) {
+    let t = Tokens::get();
+    let screen = ctx.content_rect();
+    let domain = app.services.teacher_domain.clone().unwrap_or_else(|| "school.edu".to_string());
+    let mut go = false;
+    egui::Area::new(egui::Id::new("sign_in_gate")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+        // The whole window is one widget, so no pointer event reaches what is underneath.
+        ui.allocate_rect(screen, egui::Sense::click_and_drag());
+        ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(225));
+        let card = Rect::from_center_size(screen.center(), vec2((screen.width() - 40.0).clamp(280.0, 620.0), 380.0));
+        ui.painter().rect_filled(card, 14.0, t.panel);
+        ui.painter().rect_stroke(card, 14.0, egui::Stroke::new(1.5, t.border), egui::StrokeKind::Inside);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(card.shrink(30.0)), |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(crate::tl!("Welcome")).size(34.0).strong());
+                ui.add_space(12.0);
+                ui.label(RichText::new(crate::tl!("Sign in with your school Google account to start drawing. Your drawings are saved in your Google Drive.")).size(19.0));
+                ui.add_space(22.0);
+                let button = egui::Button::new(RichText::new(crate::tl!("Sign in with Google")).size(24.0)).min_size(vec2(card.width() - 60.0, 70.0));
+                if ui.add(button).clicked() {
+                    go = true;
+                }
+                ui.add_space(14.0);
+                ui.label(RichText::new(format!("{} name@{domain}", crate::tl!("A Google window will open: choose your school account,"))).size(15.0).color(t.text_dim));
+            });
+        });
+    });
+    if go {
+        app.start("ui.signin");
     }
 }
 

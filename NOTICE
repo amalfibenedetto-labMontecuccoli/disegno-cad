@@ -22,3 +22,15 @@ each under the SIL Open Font License 1.1.
 
 CADCraft is an independent project and is not affiliated with, sponsored by or endorsed by
 Autodesk, Inc. AutoCAD and DWG are trademarks of Autodesk, Inc.
+
+Disegno CAD (this version)
+
+This is a modified version of CADCraft, adapted for classroom use at the Scuola Secondaria di
+I grado R. Montecuccoli, Pavullo nel Frignano (Italy): a school sign-in with Google, saving to the
+student's Google Drive, hand-in links, a Simple mode, and a changed name. The modifications are by
+the teachers of that school and are licensed under the same terms as CADCraft (MIT OR Apache-2.0).
+The original copyright notices above and the files LICENSE-MIT and LICENSE-APACHE are kept unchanged.
+
+This version is not made, sponsored or endorsed by the ArtCraft Team; the ArtCraft marks were removed
+from it, as docs/brand/LICENSE-brand.txt requires of modified versions. It is based on CADCraft by
+the ArtCraft team (https://getartcraft.com/apps/cadcraft).

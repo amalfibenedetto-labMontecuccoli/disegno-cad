@@ -235,6 +235,9 @@ pub struct Services {
     pub sign_out: Option<Box<dyn Fn()>>,
     /// The signed-in student's name, `None` when nobody is signed in.
     pub account: Option<Box<dyn Fn() -> Option<String>>>,
+    /// Whether a student must still sign in before drawing: while it is `true` a full-screen
+    /// cover with a big Sign in button blocks the window.
+    pub needs_sign_in: Option<Box<dyn Fn() -> bool>>,
 }
 
 pub struct CadApp {
@@ -481,6 +484,11 @@ impl CadApp {
         self.ui.dialog = Some("sharelink".into());
     }
 
+    /// Whether the sign-in cover is up: the student has to sign in before drawing.
+    pub fn gated(&self) -> bool {
+        self.services.needs_sign_in.as_ref().is_some_and(|needs| needs())
+    }
+
     /// Whether the classroom build is in its Simple mode.
     pub fn simple_ui(&self) -> bool {
         self.services.school_mode && self.ui.simple_mode
@@ -672,7 +680,9 @@ impl CadApp {
         managers::plot_window_resume(self, ctx);
         hatchdlg::resume(self);
         self.autosave_tick(ctx);
-        menus::shortcuts(self, ctx);
+        if !self.gated() {
+            menus::shortcuts(self, ctx);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let p = f.path().to_string_lossy().to_string();
@@ -743,6 +753,9 @@ impl CadApp {
         closing::prompt(self, ui.ctx());
         autosave::show(self, ui.ctx());
         autosave::gpu_notice(self, ui.ctx());
+        if self.gated() {
+            teacher::signin_gate(self, ui.ctx());
+        }
         self.frame_ms = now_ms() - t0;
     }
 

@@ -23,7 +23,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "units" => units(app, ctx, &mut open),
         "hatch" => crate::hatchdlg::dialog(app, ctx, &mut open),
         "aliasedit" => crate::aliasdlg::dialog(app, ctx, &mut open),
-        "about" => about(ctx, &mut open),
+        "about" => about(app, ctx, &mut open),
         "sendteacher" => crate::teacher::dialog(app, ctx, &mut open),
         "sharelink" => crate::teacher::link_dialog(app, ctx, &mut open),
         "signin" => crate::teacher::signin_dialog(app, ctx, &mut open),
@@ -317,10 +317,23 @@ fn units(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
-fn about(ctx: &egui::Context, open: &mut bool) {
+/// The About tab of the classroom build: what it is, who adapted it, and where it comes from.
+fn school_about(ui: &mut egui::Ui, t: &Tokens) {
+    ui.heading(crate::school::APP_NAME);
+    ui.label("Versione didattica per la scuola, basata su CADCraft.");
+    ui.label(crate::school::credits_line());
+    ui.add_space(6.0);
+    ui.label("CADCraft è software libero (licenza MIT oppure Apache-2.0) del team ArtCraft e dei suoi collaboratori. Questa versione è stata modificata.");
+    ui.hyperlink_to("Progetto originale: getartcraft.com/apps/cadcraft", "https://getartcraft.com/apps/cadcraft");
+    ui.add_space(6.0);
+    ui.label(RichText::new("Non è un prodotto del team ArtCraft né di Autodesk, Inc.").small().color(t.text_faint));
+}
+
+fn about(app: &CadApp, ctx: &egui::Context, open: &mut bool) {
     let t = Tokens::get();
+    let school = app.services.school_mode;
     let tab_id = egui::Id::new("about_tab");
-    egui::Window::new(crate::tl!("About CADCraft"))
+    egui::Window::new(if school { crate::tl!("About").to_string() } else { crate::tl!("About CADCraft").to_string() })
         .id(egui::Id::new("About CADCraft"))
         .open(open)
         .default_size(vec2(640.0, 420.0))
@@ -339,6 +352,7 @@ fn about(ctx: &egui::Context, open: &mut bool) {
             match tab {
                 1 => crate::credits::contributors_ui(ui),
                 2 => crate::credits::models_ui(ui),
+                _ if school => school_about(ui, &t),
                 _ => {
                     ui.heading(crate::tl!("CADCraft"));
                     ui.label(crate::tf!("Version {version}", version = env!("CARGO_PKG_VERSION")));

@@ -158,6 +158,16 @@ pub fn account() -> Option<String> {
     Some(USER.with(|u| u.borrow().clone()).unwrap_or_else(|| "Google".to_string()))
 }
 
+/// Whether the student still has to sign in before drawing. A student who signed in stays past
+/// the end of the hour their access lasts (saving then asks Google again); `?nodrive` skips it.
+pub fn needs_sign_in() -> bool {
+    if drive_disabled() {
+        return false;
+    }
+    restore_session();
+    USER.with(|u| u.borrow().is_none())
+}
+
 /// Whether a student is signed in (and their access still valid).
 pub fn signed_in() -> bool {
     account().is_some()
