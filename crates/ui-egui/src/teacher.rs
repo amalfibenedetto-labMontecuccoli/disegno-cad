@@ -97,6 +97,65 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
+/// A file name typed by a student, without folders, odd characters or extension.
+pub fn file_stem(text: &str) -> String {
+    let cleaned: String = text.chars().filter(|c| !matches!(c, '/' | '\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control()).collect();
+    let cleaned = cleaned.trim();
+    let stem = match cleaned.rsplit_once('.') {
+        Some((stem, ext)) if ext.eq_ignore_ascii_case("dxf") || ext.eq_ignore_ascii_case("dwg") => stem,
+        _ => cleaned,
+    };
+    stem.trim().chars().take(80).collect()
+}
+
+/// The "Save to Drive" window: the student names the file, then it goes to their Drive.
+pub fn save_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    let (mut save, mut cancel) = (false, false);
+    egui::Window::new(crate::tl!("Save to Drive"))
+        .id(egui::Id::new("save_to_drive_window"))
+        .open(open)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.label(crate::tl!("Name of the file:"));
+            let field = ui.add(egui::TextEdit::singleline(&mut app.ui.save_name).desired_width(380.0));
+            if !field.has_focus() && !field.lost_focus() {
+                field.request_focus();
+            }
+            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                save = true;
+            }
+            if !app.ui.send_error.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(230, 80, 70), crate::i18n::t(&app.ui.send_error).to_string());
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new(egui::RichText::new(crate::tl!("Save")).size(15.0)).min_size(vec2(120.0, 30.0))).clicked() {
+                    save = true;
+                }
+                if ui.button(crate::tl!("Cancel")).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+    if cancel {
+        app.ui.send_error.clear();
+        *open = false;
+    }
+    if save {
+        let name = app.ui.save_name.clone();
+        match app.run("ui.drive.save", json!({ "name": name })) {
+            Ok(_) => {
+                app.ui.send_error.clear();
+                *open = false;
+            }
+            Err(e) => app.ui.send_error = e,
+        }
+    }
+}
+
 /// The window shown once the drawing is saved and linked: the link, a Copy button and what to do
 /// with it in Classroom.
 pub fn link_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {

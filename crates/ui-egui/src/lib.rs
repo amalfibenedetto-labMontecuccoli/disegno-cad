@@ -119,6 +119,9 @@ pub struct UiState {
     pub teacher_email: String,
     #[serde(skip)]
     pub send_error: String,
+    /// The file name being typed in the "Save to Drive" window.
+    #[serde(skip)]
+    pub save_name: String,
     /// The drawing just saved for hand-in (file name, Drive link), shown in its dialog.
     #[serde(skip)]
     pub share_link: Option<(String, String, String)>,
@@ -205,6 +208,7 @@ impl Default for UiState {
             last_lisp_dir: None,
             teacher_email: String::new(),
             send_error: String::new(),
+            save_name: String::new(),
             share_link: None,
             fill_color: None,
             drive_listing: None,

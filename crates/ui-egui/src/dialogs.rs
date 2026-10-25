@@ -25,6 +25,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "aliasedit" => crate::aliasdlg::dialog(app, ctx, &mut open),
         "about" => about(app, ctx, &mut open),
         "sendteacher" => crate::teacher::dialog(app, ctx, &mut open),
+        "drivesave" => crate::teacher::save_dialog(app, ctx, &mut open),
         "sharelink" => crate::teacher::link_dialog(app, ctx, &mut open),
         "signin" => crate::teacher::signin_dialog(app, ctx, &mut open),
         "driveopen" => crate::drive_open::dialog(app, ctx, &mut open),
