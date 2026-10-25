@@ -308,10 +308,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             app.request_drive_list();
             Ok(Value::Null)
         }
-        // Save to Drive: a drawing without a file yet asks for its name first; with `{"name": …}`
+        // Save to Drive: it always asks for the file name first; with `{"name": …}`
         // it is saved under that name.
         "ui.drive.save" => {
-            let untitled = app.session.state().is_ok_and(|s| s.path.is_none());
             match params.get("name").and_then(Value::as_str) {
                 Some(name) => {
                     let name = crate::teacher::file_stem(name);
@@ -321,15 +320,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                     let path = format!("{name}.{}", app.ui.save_format.as_str());
                     return Some(app.session.execute("saveas", &saveas_params(&app.ui, &app.session, &path)).map_err(|e| e.to_string()));
                 }
-                None if untitled => {
+                None => {
                     let title = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
                     app.ui.save_name = crate::teacher::file_stem(&title);
                     app.ui.send_error.clear();
                     app.ui.dialog = Some("drivesave".into());
-                    Ok(Value::Null)
-                }
-                None => {
-                    app.start("qsave");
                     Ok(Value::Null)
                 }
             }
