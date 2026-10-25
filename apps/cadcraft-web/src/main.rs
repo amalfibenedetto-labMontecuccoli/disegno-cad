@@ -56,7 +56,7 @@ mod web {
             }
             crate::drive::remember_context(ctx);
             UNSAVED.with(|u| u.set(self.0.session.docs.iter().any(|d| d.is_dirty())));
-            autosave_tick(&self.0, ctx);
+            autosave_tick(&mut self.0, ctx);
             if let Some(note) = crate::drive::take_notice() {
                 self.0.set_status(note);
             }
@@ -153,23 +153,37 @@ mod web {
         static LAST_AUTOSAVE: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
     }
 
+    /// The autosave interval: two minutes, or `?autosave=SECONDS` (10 to 3600) to try it out.
+    fn autosave_every_ms() -> f64 {
+        query_param("autosave")
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|s| s.is_finite())
+            .map_or(AUTOSAVE_EVERY_MS, |s| s.clamp(10.0, 3600.0) * 1000.0)
+    }
+
     /// Every couple of minutes, copy each drawing with unsaved changes to the student's Drive as
     /// "Autosalvataggio - <name>.dxf", so a forgotten Save doesn't lose the work. Only while the
     /// student is signed in (it never opens a popup), and never over the drawing's own file.
-    fn autosave_tick(app: &CadApp, ctx: &egui::Context) {
+    fn autosave_tick(app: &mut CadApp, ctx: &egui::Context) {
         // The app sleeps when nothing happens: wake it now and then to look.
-        ctx.request_repaint_after(std::time::Duration::from_secs(30));
+        ctx.request_repaint_after(std::time::Duration::from_secs(10));
         let now = web_sys::js_sys::Date::now();
         let last = LAST_AUTOSAVE.with(std::cell::Cell::get);
         if last == 0.0 {
             LAST_AUTOSAVE.with(|l| l.set(now));
             return;
         }
-        if now - last < AUTOSAVE_EVERY_MS {
+        if now - last < autosave_every_ms() {
             return;
         }
         LAST_AUTOSAVE.with(|l| l.set(now));
+        if !app.session.docs.iter().any(|d| d.is_dirty()) {
+            return;
+        }
         if !crate::drive::can_autosave() {
+            if let Some(hint) = crate::drive::autosave_hint() {
+                app.set_status(hint);
+            }
             return;
         }
         for doc in app.session.docs.iter().filter(|d| d.is_dirty()) {

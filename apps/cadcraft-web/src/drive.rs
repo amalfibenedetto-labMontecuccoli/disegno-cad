@@ -267,6 +267,12 @@ pub fn can_autosave() -> bool {
     !drive_disabled() && valid_token().is_some() && !AUTOSAVING.with(Cell::get)
 }
 
+/// Why the autosave can't run, when the student can fix it (`None` when it can run, or when
+/// Drive is off): their access to Google has run out.
+pub fn autosave_hint() -> Option<&'static str> {
+    (!drive_disabled() && valid_token().is_none()).then_some("Il salvataggio automatico è fermo: premi Accedi con Google")
+}
+
 /// Keep `bytes` in Drive as the autosaved copy called `name` (in the "Disegni" folder, replacing
 /// the last autosave of that name). Quiet: a failure only goes to the log, and the status bar
 /// tells when one worked.
@@ -286,7 +292,11 @@ pub fn autosave(name: String, bytes: Vec<u8>) {
                 NOTICE.with(|n| *n.borrow_mut() = Some(note));
                 wake();
             }
-            Err(e) => log::warn!("autosave to Drive failed: {e}"),
+            Err(e) => {
+                log::warn!("autosave to Drive failed: {e}");
+                NOTICE.with(|n| *n.borrow_mut() = Some(format!("Salvataggio automatico non riuscito: {e}")));
+                wake();
+            }
         }
     });
 }
