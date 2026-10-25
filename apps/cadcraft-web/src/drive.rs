@@ -71,6 +71,11 @@ thread_local! {
     static LINK: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
     /// The signed-in student's name.
     static USER: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The student's drawings found in Drive (id, name, last change) or why not, taken by the
+    /// app's next frame.
+    static LISTING: RefCell<Option<Result<Vec<(String, String, String)>, String>>> = const { RefCell::new(None) };
+    /// A drawing downloaded from Drive (name, contents), taken by the app's next frame.
+    static OPENED: RefCell<Option<(String, Vec<u8>)>> = const { RefCell::new(None) };
     /// A note for the status bar (what the autosave just did), taken by the app's next frame.
     static NOTICE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Whether an autosave is on its way to Drive.
@@ -169,6 +174,86 @@ fn valid_token() -> Option<String> {
     restore_session();
     let now = js_sys::Date::now();
     TOKEN.with(|t| t.borrow().as_ref().filter(|t| t.expires_at_ms - TOKEN_MARGIN_MS > now).map(|t| t.value.clone()))
+}
+
+/// The list of drawings found in Drive, if it is ready: take it and show it.
+pub fn take_listing() -> Option<Result<Vec<(String, String, String)>, String>> {
+    LISTING.with(|l| l.borrow_mut().take())
+}
+
+/// A drawing downloaded from Drive, if one is ready: take it and open it.
+pub fn take_opened() -> Option<(String, Vec<u8>)> {
+    OPENED.with(|o| o.borrow_mut().take())
+}
+
+/// Most bytes of a drawing opened from Drive.
+const MAX_OPEN_BYTES: usize = 32 * 1024 * 1024;
+
+/// Open from Drive: look for the student's drawings (saved ones and autosaves) in "Disegni".
+pub fn list_drive() {
+    wasm_bindgen_futures::spawn_local(async {
+        let result = list_files().await;
+        LISTING.with(|l| *l.borrow_mut() = Some(result));
+        wake();
+    });
+}
+
+async fn list_files() -> Result<Vec<(String, String, String)>, String> {
+    let token = access_token().await?;
+    let folder = find_or_create_folder(&token).await?;
+    let url = format!(
+        "{FILES_URL}?q={}&orderBy=modifiedTime%20desc&pageSize=100&fields=files(id,name,modifiedTime)&spaces=drive",
+        encode(&drivefmt::folder_files_query(&folder))
+    );
+    let answer = request(&token, "GET", &url, None, None).await?;
+    Ok(drivefmt::drive_files(&answer).into_iter().map(|(id, name, modified)| (id, name, local_time(&modified))).collect())
+}
+
+/// Drive's time (RFC 3339, UTC) as the student's clock shows it: "25/10 10:32".
+fn local_time(rfc: &str) -> String {
+    let date = js_sys::Date::new(&JsValue::from_str(rfc));
+    if date.get_time().is_nan() {
+        return String::new();
+    }
+    format!("{:02}/{:02} {:02}:{:02}", date.get_date(), date.get_month() + 1, date.get_hours(), date.get_minutes())
+}
+
+/// Download the drawing `id` from Drive for the app to open as `name`.
+pub fn open_drive_file(id: &str, name: &str) {
+    let (id, name) = (id.to_string(), name.to_string());
+    wasm_bindgen_futures::spawn_local(async move {
+        match download(&id).await {
+            Ok(bytes) => {
+                OPENED.with(|o| *o.borrow_mut() = Some((name, bytes)));
+                wake();
+            }
+            Err(e) => notify(&format!("Non riesco ad aprire il disegno dal Drive: {e}")),
+        }
+    });
+}
+
+async fn download(id: &str) -> Result<Vec<u8>, String> {
+    let token = access_token().await?;
+    let headers = js_sys::Object::new();
+    set(&headers, "Authorization", &JsValue::from_str(&format!("Bearer {token}")))?;
+    let init = web_sys::RequestInit::new();
+    init.set_method("GET");
+    init.set_headers(&headers);
+    let window = web_sys::window().ok_or("nessuna finestra del browser")?;
+    let response = JsFuture::from(window.fetch_with_str_and_init(&format!("{FILES_URL}/{}?alt=media", encode(id)), &init))
+        .await
+        .map_err(js_error)?
+        .dyn_into::<web_sys::Response>()
+        .map_err(|_| "risposta non valida da Google".to_string())?;
+    if !response.ok() {
+        return Err(format!("Drive ha risposto {}", response.status()));
+    }
+    let buffer = JsFuture::from(response.array_buffer().map_err(js_error)?).await.map_err(js_error)?;
+    let bytes = js_sys::Uint8Array::new(&buffer);
+    if bytes.length() as usize > MAX_OPEN_BYTES {
+        return Err("il disegno è troppo grande".to_string());
+    }
+    Ok(bytes.to_vec())
 }
 
 /// What the autosave has to tell the student, if anything: take it and show it.

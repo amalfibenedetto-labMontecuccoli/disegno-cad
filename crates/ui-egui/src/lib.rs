@@ -20,6 +20,7 @@ pub mod cmdline;
 pub mod context_menu;
 pub mod control;
 pub mod credits;
+pub mod drive_open;
 pub mod school;
 pub mod teacher;
 pub mod dialogs;
@@ -121,6 +122,9 @@ pub struct UiState {
     /// The drawing just saved for hand-in (file name, Drive link), shown in its dialog.
     #[serde(skip)]
     pub share_link: Option<(String, String, String)>,
+    /// The drawings found in the student's Drive (`None` while the host is still looking).
+    #[serde(skip)]
+    pub drive_listing: Option<Result<Vec<DriveFile>, String>>,
     /// The colour picked in the fill tool's palette (index into `school::PAINT_COLORS`).
     #[serde(skip)]
     pub fill_color: Option<usize>,
@@ -203,9 +207,19 @@ impl Default for UiState {
             send_error: String::new(),
             share_link: None,
             fill_color: None,
+            drive_listing: None,
             simple_mode: true,
         }
     }
+}
+
+/// A drawing in the student's Google Drive, as the Open from Drive window lists it.
+#[derive(Clone, Debug)]
+pub struct DriveFile {
+    pub id: String,
+    pub name: String,
+    /// When it was last changed, already formatted for the student.
+    pub modified: String,
 }
 
 /// Host services (file pickers, clipboard) injected by the app so this crate stays portable.
@@ -239,6 +253,11 @@ pub struct Services {
     pub sign_out: Option<Box<dyn Fn() -> bool>>,
     /// The signed-in student's name, `None` when nobody is signed in.
     pub account: Option<Box<dyn Fn() -> Option<String>>>,
+    /// Ask for the list of the student's drawings in Drive; the host answers with
+    /// [`CadApp::set_drive_files`].
+    pub drive_list: Option<Box<dyn Fn()>>,
+    /// Open a drawing from Drive (id, name); the host hands its contents over like a picked file.
+    pub drive_open: Option<Box<dyn Fn(&str, &str)>>,
     /// Whether a student must still sign in before drawing: while it is `true` a full-screen
     /// cover with a big Sign in button blocks the window.
     pub needs_sign_in: Option<Box<dyn Fn() -> bool>>,
@@ -486,6 +505,27 @@ impl CadApp {
     pub fn show_share_link(&mut self, name: &str, link: &str, folder: &str) {
         self.ui.share_link = Some((name.to_string(), link.to_string(), folder.to_string()));
         self.ui.dialog = Some("sharelink".into());
+    }
+
+    /// The host found (or failed to find) the student's drawings in Drive.
+    pub fn set_drive_files(&mut self, files: Result<Vec<DriveFile>, String>) {
+        self.ui.drive_listing = Some(files);
+    }
+
+    /// Ask the host for the list of drawings in Drive again.
+    pub fn request_drive_list(&mut self) {
+        self.ui.drive_listing = None;
+        if let Some(list) = &self.services.drive_list {
+            list();
+        }
+    }
+
+    /// Have the host open the drawing `file` from Drive.
+    pub fn open_from_drive(&mut self, file: &DriveFile) {
+        if let Some(open) = &self.services.drive_open {
+            open(&file.id, &file.name);
+            self.set_status(format!("{} {}", crate::tl!("Opening"), file.name));
+        }
     }
 
     /// Whether the sign-in cover is up: the student has to sign in before drawing.

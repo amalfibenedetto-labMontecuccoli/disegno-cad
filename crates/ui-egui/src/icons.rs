@@ -50,6 +50,7 @@ pub enum Icon {
     Boundary,
     Region,
     Bucket,
+    DriveOpen,
     Wipeout,
     Table,
     Text,
@@ -464,6 +465,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
         Region => {
             pen.poly(&[(4.0, 18.0), (6.0, 6.0), (16.0, 4.0), (20.0, 14.0), (12.0, 20.0)], true, a);
             pen.fill_c(12.0, 12.0, 3.0, a.gamma_multiply(0.5));
+        }
+        DriveOpen => {
+            pen.poly(&[(3.0, 6.0), (9.0, 6.0), (11.0, 8.0), (20.0, 8.0), (20.0, 19.0), (3.0, 19.0)], true, b);
+            pen.fill_c(12.5, 14.5, 2.6, a);
+            pen.fill_c(16.0, 14.0, 3.0, a);
+            pen.fill_rect(12.5, 14.5, 3.5, 2.8, a);
         }
         Bucket => {
             pen.poly(&[(4.0, 12.0), (11.0, 5.0), (18.0, 12.0), (11.0, 19.0)], true, b);

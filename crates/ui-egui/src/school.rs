@@ -74,7 +74,7 @@ pub const SIMPLE_TOOLS: &[&str] = &[
 
 /// The tool bar buttons Simple mode shows (command ids).
 pub const SIMPLE_TOOLBAR: &[&str] =
-    &["new", "open", "qsave", "saveas", "u", "redo", "export", "zoom.window", "pan", "zoom.extents", "ui.dialog.layers", "dist", "ui.dialog.about"];
+    &["new", "open", "ui.drive.open", "qsave", "saveas", "u", "redo", "export", "zoom.window", "pan", "zoom.extents", "ui.dialog.layers", "dist", "ui.dialog.about"];
 
 /// The menus Simple mode shows.
 pub const SIMPLE_MENUS: &[&str] = &["File", "Edit", "View", "Draw", "Modify", "Dimension", "Help"];
@@ -84,6 +84,7 @@ pub const SIMPLE_MENU_ITEMS: &[&str] = &[
     "new",
     "open",
     "ui.open",
+    "ui.drive.open",
     "qsave",
     "saveas",
     "ui.saveas",

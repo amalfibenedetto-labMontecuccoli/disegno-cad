@@ -27,6 +27,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "sendteacher" => crate::teacher::dialog(app, ctx, &mut open),
         "sharelink" => crate::teacher::link_dialog(app, ctx, &mut open),
         "signin" => crate::teacher::signin_dialog(app, ctx, &mut open),
+        "driveopen" => crate::drive_open::dialog(app, ctx, &mut open),
         "preview" => crate::exchange::dialog(app, ctx, &mut open),
         "commands" => commands(app, ctx, &mut open),
         "blocks" => blocks(app, ctx, &mut open),

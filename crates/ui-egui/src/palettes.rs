@@ -278,7 +278,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                             });
                         }
                         // Simple mode: the colours of the fill tool, to pick before clicking a zone.
-                        if simple && *name == "Hatch" {
+                        if app.services.school_mode && *name == "Hatch" {
                             ui.add_space(4.0);
                             for (r, row) in crate::school::PAINT_COLORS.chunks(5).enumerate() {
                                 ui.horizontal(|ui| {

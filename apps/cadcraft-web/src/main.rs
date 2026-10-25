@@ -23,7 +23,7 @@ mod host;
 #[cfg(target_arch = "wasm32")]
 mod web {
     use cadcraft_engine::Session;
-    use cadcraft_ui_egui::{CadApp, Services};
+    use cadcraft_ui_egui::{CadApp, DriveFile, Services};
     use wasm_bindgen::JsCast as _;
 
     const CANVAS_ID: &str = "cadcraft_canvas";
@@ -62,6 +62,12 @@ mod web {
             }
             if let Some((name, link, folder)) = crate::drive::take_link() {
                 self.0.show_share_link(&name, &link, &folder);
+            }
+            if let Some(listing) = crate::drive::take_listing() {
+                self.0.set_drive_files(listing.map(|files| files.into_iter().map(|(id, name, modified)| DriveFile { id, name, modified }).collect()));
+            }
+            if let Some((name, bytes)) = crate::drive::take_opened() {
+                self.1.receive(name, bytes);
             }
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
@@ -127,6 +133,8 @@ mod web {
             sign_out: Some(Box::new(sign_out_hook)),
             account: Some(Box::new(crate::drive::account)),
             needs_sign_in: Some(Box::new(crate::drive::needs_sign_in)),
+            drive_list: Some(Box::new(crate::drive::list_drive)),
+            drive_open: Some(Box::new(crate::drive::open_drive_file)),
             teacher_domain: Some(crate::drive::SCHOOL_DOMAIN.to_string()),
             ..Services::default()
         }

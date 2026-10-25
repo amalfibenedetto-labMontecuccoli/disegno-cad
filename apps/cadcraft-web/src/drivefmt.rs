@@ -58,6 +58,28 @@ pub fn autosave_name(title: &str) -> String {
     format!("Autosalvataggio - {}.dxf", if clean.is_empty() { "Disegno" } else { clean })
 }
 
+/// Query for the files inside the folder `parent`.
+pub fn folder_files_query(parent: &str) -> String {
+    format!("'{}' in parents and trashed = false", quote(parent))
+}
+
+/// The drawings in a `files.list` answer: (id, name, modified time as Drive gives it), in the
+/// order Drive sent them. Other files and malformed entries are left out.
+pub fn drive_files(answer: &Value) -> Vec<(String, String, String)> {
+    let Some(list) = answer.get("files").and_then(Value::as_array) else { return Vec::new() };
+    list.iter()
+        .filter_map(|file| {
+            let id = file.get("id")?.as_str()?;
+            let name = file.get("name")?.as_str()?;
+            if !is_drawing(name) {
+                return None;
+            }
+            let modified = file.get("modifiedTime").and_then(Value::as_str).unwrap_or_default();
+            Some((id.to_string(), name.to_string(), modified.to_string()))
+        })
+        .collect()
+}
+
 /// The link that opens a file in the browser, in an answer asked for `webViewLink`.
 pub fn web_link(answer: &Value) -> Option<String> {
     answer.get("webViewLink")?.as_str().filter(|l| l.starts_with("https://")).map(str::to_string)
@@ -150,6 +172,26 @@ mod tests {
         assert_eq!(web_link(&json!({"webViewLink": "https://drive.google.com/file/d/x/view"})).as_deref(), Some("https://drive.google.com/file/d/x/view"));
         assert_eq!(web_link(&json!({"webViewLink": "javascript:alert(1)"})), None);
         assert_eq!(web_link(&json!({})), None);
+    }
+
+    /// Guards the Open from Drive list: only drawings, in Drive's order, and a malformed answer
+    /// gives an empty list rather than a panic.
+    #[test]
+    fn the_drive_list_keeps_only_drawings() {
+        let answer = json!({"files": [
+            {"id": "1", "name": "stella.dxf", "modifiedTime": "2026-10-25T10:00:00.000Z"},
+            {"id": "2", "name": "foto.png", "modifiedTime": "2026-10-25T09:00:00.000Z"},
+            {"id": "3", "name": "Autosalvataggio - stella.dxf"},
+            {"name": "senza-id.dxf"},
+            {"id": 5, "name": "x.dxf"}
+        ]});
+        let files = drive_files(&answer);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].1, "stella.dxf");
+        assert_eq!(files[1], ("3".to_string(), "Autosalvataggio - stella.dxf".to_string(), String::new()));
+        assert!(drive_files(&json!({})).is_empty());
+        assert!(drive_files(&json!({"files": "no"})).is_empty());
+        assert_eq!(folder_files_query("a'b"), "'a\\'b' in parents and trashed = false");
     }
 
     /// Guards the autosave name: it never equals the drawing's own file name (so it can't overwrite

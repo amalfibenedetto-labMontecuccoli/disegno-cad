@@ -13,6 +13,7 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
     &[
         (Icon::New, "new", "New Drawing", Some("Cmd+N")),
         (Icon::Open, "open", "Open", Some("Cmd+O")),
+        (Icon::DriveOpen, "ui.drive.open", "Open from Drive", None),
         (Icon::Save, "qsave", "Save", Some("Cmd+S")),
         (Icon::SaveAs, "saveas", "Save As", None),
     ],

@@ -75,6 +75,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.mode.simple", "Simple mode", &["View", "Simple mode"], None),
     ("ui.mode.normal", "Normal mode", &["View", "Normal mode"], None),
     ("ui.reset", "Reset settings", &["View", "Reset settings"], None),
+    ("ui.drive.open", "Open from Drive...", &["File", "Open from Drive..."], None),
     ("ui.signin", "Sign in with Google", &[], None),
     ("ui.signout", "Sign out", &[], None),
     ("ui.noop", "", &[], None),
@@ -295,6 +296,15 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             if sign_out() {
                 app.forget_student();
             }
+            Ok(Value::Null)
+        }
+        // The student's drawings in their Google Drive, to open with a click.
+        "ui.drive.open" => {
+            if app.services.drive_list.is_none() || app.services.drive_open.is_none() {
+                return Some(Err("Open from Drive is not available here".to_string()));
+            }
+            app.ui.dialog = Some("driveopen".into());
+            app.request_drive_list();
             Ok(Value::Null)
         }
         // Interface back to how it starts; the drawings stay.
