@@ -23,6 +23,11 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("hatch", "Hatch...", run_hatch).menu(&["Draw", "Hatch..."]).alias(&["h", "bh", "-hatch"]).params("{points?: [[x,y]] (internal points) and/or handles?: [hex] (closed objects), pattern?: \"ANSI31\" (built in, or defined by patternFile | patternText), patternFile?: path to a .pat file | patternText?: its contents (loads the patterns it defines), scale?, angle? (degrees), associative? (HPASSOC), separate? (HPSEPARATE: a hatch per point/object), origin?: [x,y] (HPORIGIN) | originMode?: \"current\"|\"bottomLeft\"|\"bottomRight\"|\"topLeft\"|\"topRight\"|\"center\" (HPORIGINMODE), style?: \"normal\"|\"outer\"|\"ignore\" (HPISLANDDETECTION)} — gaps up to HPGAPTOL close").interactive(|s| Ok(Box::new(HatchM::new(s, false)))),
         CommandSpec::new("gradient", "Gradient...", run_gradient).menu(&["Draw", "Gradient..."]).alias(&["gd"]).params("{points? and/or handles?, name?: \"LINEAR\"|\"CYLINDER\"|\"CURVED\"|\"SPHERICAL\"|\"HEMISPHERICAL\" or INV… (colours swapped), color1?, color2?, angle? (degrees), centered? (default true)}").interactive(|s| Ok(Box::new(HatchM::new(s, true)))),
+        CommandSpec::new("paint", "Fill with Color...", run_paint)
+            .menu(&["Draw", "Fill with Color..."])
+            .alias(&["fillcolor"])
+            .params("{points: [[x,y]] (a point inside each zone to colour with the current colour: one solid hatch per point, just that zone)}")
+            .interactive(|_| Ok(Box::new(PaintM))),
         CommandSpec::new("boundary", "Boundary...", run_boundary).menu(&["Draw", "Boundary..."]).alias(&["bo", "bpoly"]).params("{points: [[x,y]]}").interactive(|_| Ok(Box::new(BoundaryM { region: false }))),
         CommandSpec::new("region", "Region", run_region).menu(&["Draw", "Region"]).alias(&["reg"]).params("{handles?}"),
         CommandSpec::new("hatchedit", "Hatch Edit", edit::run_hatchedit).menu(&["Modify", "Object", "Hatch..."]).alias(&["he", "-hatchedit"]).params("{handles?, pattern?, scale?, angle?, gradient?: {name?, color1?, color2?, angle? (degrees), centered?} (makes or changes a gradient fill; `pattern` turns it back), associative?: bool (false unlinks; true links each loop to a closed object of the same shape, or to `boundary` objects), boundary?: [hex], addPoints?: [[x,y]], addBoundary?: [hex], removeLoops?: [zero-based index] (geometry edits require one hatch), style?, origin? | originMode?, separate?: true, recreate?: \"polyline\"|\"region\", associate?: bool (link to the recreated boundary)}").interactive(|s| Ok(Box::new(edit::HatchEditM::new(s)))),
@@ -749,6 +754,63 @@ impl Interactive for HatchM {
             return Vec::new();
         }
         vec![self.settings.hatch(self.loops.iter().flatten().cloned().collect())]
+    }
+}
+
+/// Most points one PAINT call accepts.
+const MAX_PAINT_POINTS: usize = 256;
+
+/// Fill just the zone around `q` with the current colour: one solid hatch, never merged with the
+/// ones made before (the bucket of a paint program).
+fn paint_at(s: &mut Session, q: Vec2) -> Result<Vec<Handle>> {
+    let st = HatchSettings::from(s, &json!({ "pattern": "SOLID", "separate": true }), false);
+    let loops = loops_at(s, q)?;
+    add_hatches(s, &st, vec![loops])
+}
+
+/// PAINT: each point fills the zone it is in with the current colour.
+fn run_paint(s: &mut Session, p: &Value) -> Result<Value> {
+    let raw = p.get("points").and_then(Value::as_array).ok_or_else(|| bad("paint", "`points` is required"))?;
+    if raw.is_empty() || raw.len() > MAX_PAINT_POINTS {
+        return Err(bad("paint", format!("give between 1 and {MAX_PAINT_POINTS} points (got {})", raw.len())));
+    }
+    let pts = points_param(p, "points").ok_or_else(|| bad("paint", "`points` is required"))?;
+    let before = s.state()?.doc.clone();
+    let mut out = Vec::new();
+    for q in pts {
+        match paint_at(s, q) {
+            Ok(hs) => out.extend(hs.into_iter().map(|h| h.hex())),
+            Err(e) => {
+                // The refused call leaves no partial result behind.
+                s.state_mut()?.doc = before;
+                return Err(e);
+            }
+        }
+    }
+    Ok(json!({ "handles": out, "message": format!("PAINT filled {} zone(s)", out.len()) }))
+}
+
+struct PaintM;
+
+impl Interactive for PaintM {
+    fn name(&self) -> &'static str {
+        "PAINT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Click inside a zone to color it (Enter to finish)", Accept::POINT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Point(p) => {
+                match paint_at(s, p) {
+                    Ok(hs) => s.echo(format!("Filled {} zone(s)", hs.len())),
+                    Err(e) => s.echo(e.to_string()),
+                }
+                Ok(Step::Continue)
+            }
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
     }
 }
 

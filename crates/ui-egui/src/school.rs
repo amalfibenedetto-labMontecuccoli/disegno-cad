@@ -22,6 +22,21 @@ pub fn credits_line() -> String {
 /// The object snaps on in Simple mode: end, middle, centre, quadrant, intersection, perpendicular.
 pub const SIMPLE_OSMODE: u32 = END | MID | CEN | QUA | INT | PER;
 
+/// The colours of the fill tool's palette (name, RGB), picked from the colours of the star
+/// patterns students draw.
+pub const PAINT_COLORS: &[(&str, [u8; 3])] = &[
+    ("Arancione", [242, 153, 50]),
+    ("Viola", [166, 123, 191]),
+    ("Azzurro", [91, 192, 216]),
+    ("Verde", [108, 191, 75]),
+    ("Giallo", [247, 203, 45]),
+    ("Blu", [43, 150, 216]),
+    ("Rosso", [224, 72, 60]),
+    ("Rosa", [236, 127, 165]),
+    ("Grigio", [154, 160, 166]),
+    ("Bianco", [255, 255, 255]),
+];
+
 /// The Tool Sets groups Simple mode shows.
 pub const SIMPLE_GROUPS: &[&str] = &["Draw", "Hatch", "Modify", "Text", "Dimension"];
 
@@ -34,6 +49,7 @@ pub const SIMPLE_TOOLS: &[&str] = &[
     "rectang",
     "polygon",
     "ellipse",
+    "paint",
     "hatch",
     "move",
     "copy",

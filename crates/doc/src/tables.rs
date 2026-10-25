@@ -356,7 +356,7 @@ impl Default for DimStyle {
             ext_extend: 0.18,
             text_height: 0.18,
             text_gap: 0.09,
-            decimals: 4,
+            decimals: 2,
             angular_decimals: 0,
             linear_factor: 1.0,
             text_above: 0,

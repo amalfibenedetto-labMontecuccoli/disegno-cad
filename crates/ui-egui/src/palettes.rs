@@ -42,7 +42,16 @@ pub const DRAFTING: &[(&str, &[Tool], &[Tool])] = &[
             (Icon::Wipeout, "wipeout", "Wipeout"),
         ],
     ),
-    ("Hatch", &[(Icon::Hatch, "hatch", "Hatch"), (Icon::Gradient, "gradient", "Gradient"), (Icon::Boundary, "boundary", "Boundary")], &[]),
+    (
+        "Hatch",
+        &[
+            (Icon::Bucket, "paint", "Fill with Color"),
+            (Icon::Hatch, "hatch", "Hatch"),
+            (Icon::Gradient, "gradient", "Gradient"),
+            (Icon::Boundary, "boundary", "Boundary"),
+        ],
+        &[],
+    ),
     (
         "Block",
         &[
@@ -181,6 +190,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         let body = Rect::from_min_max(pos2(r.left(), r.top() + tab_h), r.max);
         let mut clicked: Option<&'static str> = None;
+        let mut picked_color: Option<usize> = None;
         let mut toggle_group = None;
         let mut tool_visible: Option<(String, bool)> = None;
         let mut restore: Vec<String> = Vec::new();
@@ -267,6 +277,29 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                 }
                             });
                         }
+                        // Simple mode: the colours of the fill tool, to pick before clicking a zone.
+                        if simple && *name == "Hatch" {
+                            ui.add_space(4.0);
+                            for (r, row) in crate::school::PAINT_COLORS.chunks(5).enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(8.0);
+                                    ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
+                                    for (k, (color_name, [cr, cg, cb])) in row.iter().enumerate() {
+                                        let index = r * 5 + k;
+                                        let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::click());
+                                        ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(*cr, *cg, *cb));
+                                        let selected = app.ui.fill_color == Some(index);
+                                        let outline = if selected { Stroke::new(2.5, Color32::WHITE) } else { Stroke::new(1.0, t.border) };
+                                        ui.painter().rect_stroke(rect, 4.0, outline, egui::StrokeKind::Inside);
+                                        icons::describe_control(ui, &resp, color_name, Some(selected), true);
+                                        if resp.on_hover_text(*color_name).clicked() {
+                                            picked_color = Some(index);
+                                        }
+                                    }
+                                });
+                                ui.add_space(3.0);
+                            }
+                        }
                         ui.add_space(6.0);
                     }
                     let (sr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -290,6 +323,12 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
             } else {
                 app.ui.collapsed_groups.push(g);
             }
+        }
+        if let Some(i) = picked_color
+            && let Some((_, [r, g, b])) = crate::school::PAINT_COLORS.get(i)
+        {
+            app.ui.fill_color = Some(i);
+            let _ = app.run("setvar", json!({ "name": "CECOLOR", "value": format!("#{r:02x}{g:02x}{b:02x}") }));
         }
         if let Some(c) = clicked {
             app.cmd.buffer.clear();

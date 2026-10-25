@@ -49,6 +49,7 @@ pub enum Icon {
     Gradient,
     Boundary,
     Region,
+    Bucket,
     Wipeout,
     Table,
     Text,
@@ -463,6 +464,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
         Region => {
             pen.poly(&[(4.0, 18.0), (6.0, 6.0), (16.0, 4.0), (20.0, 14.0), (12.0, 20.0)], true, a);
             pen.fill_c(12.0, 12.0, 3.0, a.gamma_multiply(0.5));
+        }
+        Bucket => {
+            pen.poly(&[(4.0, 12.0), (11.0, 5.0), (18.0, 12.0), (11.0, 19.0)], true, b);
+            pen.la(11.0, 5.0, 11.0, 2.5);
+            pen.fill_c(19.5, 18.5, 2.4, a);
         }
         Wipeout => {
             pen.rect(3.0, 3.0, 13.0, 13.0, b);

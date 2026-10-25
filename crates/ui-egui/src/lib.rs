@@ -121,6 +121,9 @@ pub struct UiState {
     /// The drawing just saved for hand-in (file name, Drive link), shown in its dialog.
     #[serde(skip)]
     pub share_link: Option<(String, String, String)>,
+    /// The colour picked in the fill tool's palette (index into `school::PAINT_COLORS`).
+    #[serde(skip)]
+    pub fill_color: Option<usize>,
     /// The classroom build's Simple mode (basic tools and squared-paper snaps); the full interface
     /// otherwise. Only the classroom build (`Services::school_mode`) offers it.
     pub simple_mode: bool,
@@ -199,6 +202,7 @@ impl Default for UiState {
             teacher_email: String::new(),
             send_error: String::new(),
             share_link: None,
+            fill_color: None,
             simple_mode: true,
         }
     }
@@ -520,10 +524,16 @@ impl CadApp {
         self.ui.send_error.clear();
         self.ui.share_link = None;
         self.ui.recent_files.clear();
+        self.fresh_drawing();
+        self.reset_ui();
+    }
+
+    /// Replace the open drawings with one empty drawing made with the current defaults (the
+    /// classroom build uses it so the first drawing is metric too).
+    pub fn fresh_drawing(&mut self) {
         let _ = self.run("closeall", json!({}));
         let _ = self.run("new", json!({}));
         self.ui.start_tab = false;
-        self.reset_ui();
     }
 
     /// Whether the classroom build is in its Simple mode.

@@ -232,6 +232,18 @@ mod web {
                         // The classroom defaults (Simple mode: snaps and grid like squared paper).
                         if app.simple_ui() {
                             app.apply_simple_defaults();
+                            // The first drawing was made before the metric default: make it again.
+                            if app_bridge.is_none() {
+                                app.fresh_drawing();
+                            }
+                        }
+                        // A new sign-in starts from a clean slate, even if the last student never
+                        // pressed Sign out: no address of theirs, no recent files, defaults back.
+                        if app_bridge.is_none() && crate::drive::needs_sign_in() {
+                            app.ui.teacher_email.clear();
+                            app.ui.recent_files.clear();
+                            app.reset_ui();
+                            app.status = None;
                         }
                         if query().contains("sample") {
                             let _ = app.run("ui.sample", serde_json::json!({}));
