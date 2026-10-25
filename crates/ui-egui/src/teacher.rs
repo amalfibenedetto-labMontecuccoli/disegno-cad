@@ -99,7 +99,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
 /// A file name typed by a student, without folders, odd characters or extension.
 pub fn file_stem(text: &str) -> String {
-    let cleaned: String = text.chars().filter(|c| !matches!(c, '/' | '\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control()).collect();
+    let cleaned: String = text.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control()).collect();
     let cleaned = cleaned.trim();
     let stem = match cleaned.rsplit_once('.') {
         Some((stem, ext)) if ext.eq_ignore_ascii_case("dxf") || ext.eq_ignore_ascii_case("dwg") => stem,
