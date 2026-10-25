@@ -22,7 +22,7 @@ email a un docente della scuola.
 
 Disegno CAD è una **versione modificata di [CADCraft](https://getartcraft.com/apps/cadcraft)**, il
 programma di disegno libero scritto in Rust dal team ArtCraft e dai suoi collaboratori. Le modifiche
-sono dei docenti della scuola. Non è un prodotto del team ArtCraft.
+sono di Benedetto Amalfi, docente di Tecnologia della scuola. Non è un prodotto del team ArtCraft.
 
 Il codice è distribuito con la stessa licenza di CADCraft: **MIT oppure Apache-2.0**, a scelta
 (`LICENSE-MIT`, `LICENSE-APACHE`). Gli avvisi di copyright originali sono conservati in `NOTICE`;

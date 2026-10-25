@@ -8,8 +8,8 @@ use cadcraft_engine::snap::mode::{CEN, END, INT, MID, PER, QUA};
 /// The name of this version of the program.
 pub const APP_NAME: &str = "Disegno CAD";
 
-/// Who adapted CADCraft for the school, for the credits; empty until a name is filled in.
-pub const ADAPTER: &str = "";
+/// Who adapted CADCraft for the school, for the credits (empty: the school's teachers).
+pub const ADAPTER: &str = "Benedetto Amalfi, docente di Tecnologia";
 
 /// The school this version is for.
 pub const SCHOOL: &str = "Scuola Secondaria di I grado R. Montecuccoli, Pavullo nel Frignano";
