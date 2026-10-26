@@ -38,7 +38,6 @@ jobs:
         run: trunk build --release
 
       # The Trunk config writes to dist/web at the repository root.
-      - run: cp guida.html dist/web/guida.html
       - run: touch dist/web/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
