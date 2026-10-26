@@ -192,7 +192,7 @@ pub fn link_dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             ui.add_space(6.0);
             ui.label(crate::tl!("In Classroom: open the assignment, choose Add or create, then Link, and paste it."));
             ui.add_space(6.0);
-            ui.hyperlink_to(crate::tl!("Open the Disegni folder in Drive"), &folder);
+            ui.add(egui::Hyperlink::from_label_and_url(crate::tl!("Open the Disegni folder in Drive"), &folder).open_in_new_tab(true));
         });
     if copy {
         ctx.copy_text(link);
