@@ -212,7 +212,7 @@ impl Default for UiState {
             share_link: None,
             fill_color: None,
             drive_listing: None,
-            simple_mode: true,
+            simple_mode: false,
         }
     }
 }
@@ -496,9 +496,8 @@ impl CadApp {
         if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
             self.ui.last_lisp_dir = Some(dir.to_string());
         }
-        if let Some(simple) = v.get("simpleMode").and_then(Value::as_bool) {
-            self.ui.simple_mode = simple;
-        }
+        // The interface mode is not restored: every start is the normal one (the Simple mode is
+        // one menu choice away).
         if let Some(email) = v.get("teacherEmail").and_then(Value::as_str).filter(|e| e.chars().count() <= 254) {
             self.ui.teacher_email = email.to_string();
         }
@@ -554,10 +553,7 @@ impl CadApp {
         self.ui.dialog = None;
         self.options = options::UiOptions::default();
         let _ = docking::command(self, true, &json!({}));
-        if self.services.school_mode {
-            self.ui.simple_mode = true;
-            self.apply_simple_defaults();
-        }
+        self.ui.simple_mode = false;
         self.set_status(crate::tl!("Settings restored"));
     }
 
