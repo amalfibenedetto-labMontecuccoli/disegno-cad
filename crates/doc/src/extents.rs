@@ -48,11 +48,54 @@ fn blank(s: &str) -> bool {
     s.replace("\\~", " ").chars().all(char::is_whitespace)
 }
 
+/// How many characters one line of MTEXT contents shows: the formatting codes (`\fArial|b0;`,
+/// `\H2.5;`, `\C1;`, braces) take no room, and an escaped character (`\\`, `\{`, `\~`, `\U+00E8`)
+/// is one.
+fn shown_chars(line: &str) -> usize {
+    let mut n = 0;
+    let mut it = line.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '{' | '}' => {}
+            '\\' => match it.next() {
+                // A code with arguments up to its `;`.
+                Some('f' | 'F' | 'H' | 'h' | 'C' | 'c' | 'Q' | 'q' | 'W' | 'w' | 'T' | 't' | 'A' | 'a' | 'p') => {
+                    for d in it.by_ref() {
+                        if d == ';' {
+                            break;
+                        }
+                    }
+                }
+                // Switches (`\L`, `\l`, `\O`, `\o`, `\K`, `\k`, `\N`) take no room.
+                Some('L' | 'l' | 'O' | 'o' | 'K' | 'k' | 'N') | None => {}
+                // `\U+XXXX` is one character.
+                Some('U' | 'u') if it.peek() == Some(&'+') => {
+                    it.next();
+                    for _ in 0..4 {
+                        if it.peek().is_some_and(char::is_ascii_hexdigit) {
+                            it.next();
+                        }
+                    }
+                    n += 1;
+                }
+                // `\\`, `\{`, `\}`, `\~`: the character itself.
+                Some(_) => n += 1,
+            },
+            _ => n += 1,
+        }
+    }
+    n.max(1)
+}
+
 /// Approximate box of an MTEXT, from its attachment point, width and line count.
 fn mtext_box(t: &crate::MText) -> Bounds2 {
     let lines = t.contents.split("\\P").count().max(1);
-    let longest = t.contents.split("\\P").map(|l| l.chars().count()).max().unwrap_or(1);
-    let mut w = if t.width > 0.0 { t.width } else { t.height * 0.8 * longest as f64 };
+    let longest = t.contents.split("\\P").map(shown_chars).max().unwrap_or(1);
+    let natural = t.height * 0.8 * longest as f64;
+    // The width of an MTEXT is where its lines wrap, not how wide the text is: a short text in a
+    // wide frame takes only the room it needs (the frame of the logo text in a real drawing was
+    // 17 times wider than its letters, and ZOOM Extents showed the drawing in one corner).
+    let mut w = if t.width > 0.0 { t.width.min(natural) } else { natural };
     let mut h = t.height * 1.66 * lines as f64;
     if let Some(c) = t.columns.as_ref().filter(|_| t.width > 0.0) {
         // Columns side by side, the text flowing down each in turn.
