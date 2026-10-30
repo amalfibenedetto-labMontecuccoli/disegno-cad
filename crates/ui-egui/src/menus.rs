@@ -70,6 +70,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.cmdline.clear", "Clear Command History", &[], None),
     ("ui.dialog.language", "Interface Language", &["Edit", "Interface Language"], None),
     ("ui.language", "Language", &[], None),
+    ("ui.imageattach", "Insert picture...", &["File", "Insert picture..."], None),
     ("ui.sendteacher", "Hand in", &["File", "Hand in"], None),
     ("ui.sharelink", "Save and copy link", &[], None),
     ("ui.drive.save", "Save to Drive", &[], None),
@@ -159,6 +160,16 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(json!({"interfaceLanguage": preference.code(), "shown": shown}))
         }
         "ui.open" | "open" if no_path => {
+            let picked = app.services.pick_open.as_ref().and_then(|f| f());
+            if let Some(p) = picked {
+                app.open_path(&p);
+            }
+            Ok(Value::Null)
+        }
+        // Insert picture: the file picker, then the picture (PNG or JPEG) is placed in the
+        // drawing as OPEN places one. On the web the picker returns nothing now; the chosen file
+        // arrives later and is placed by `open_bytes`.
+        "ui.imageattach" | "imageattach" | "ima" if no_path => {
             let picked = app.services.pick_open.as_ref().and_then(|f| f());
             if let Some(p) = picked {
                 app.open_path(&p);

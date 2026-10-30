@@ -877,6 +877,33 @@ pub struct Image {
     pub pixel_size: Vec2,
     #[serde(default)]
     pub resolution_units: u8,
+    /// The decoded pixels, when the picture is embedded in the drawing (see
+    /// `cadcraft_io::raster_image`). Not part of the saved entity: the file holds the compressed
+    /// picture in the entity's extended data and the reader decodes it again.
+    #[serde(skip)]
+    pub pixels: Option<Pixels>,
+}
+
+/// A decoded picture: RGBA, 8 bits per channel, rows from the top, not premultiplied.
+#[derive(Clone, Debug)]
+pub struct Pixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: std::sync::Arc<Vec<u8>>,
+}
+
+impl PartialEq for Pixels {
+    fn eq(&self, other: &Self) -> bool {
+        self.width == other.width && self.height == other.height && (std::sync::Arc::ptr_eq(&self.rgba, &other.rgba) || self.rgba == other.rgba)
+    }
+}
+
+impl Pixels {
+    /// `None` unless `rgba` holds exactly `width` × `height` pixels (both non-zero).
+    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Option<Pixels> {
+        let len = usize::try_from(width).ok()?.checked_mul(usize::try_from(height).ok()?)?.checked_mul(4)?;
+        (width > 0 && height > 0 && rgba.len() == len).then(|| Pixels { width, height, rgba: std::sync::Arc::new(rgba) })
+    }
 }
 fn image_display() -> u16 {
     7
@@ -904,6 +931,7 @@ impl Default for Image {
             fade: 0,
             pixel_size: image_pixel(),
             resolution_units: 0,
+            pixels: None,
         }
     }
 }
@@ -1168,7 +1196,13 @@ impl EntityKind {
                 .flat_map(|l| l.windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(w.first()?.xy(), w.get(1)?.xy()))))))
                 .chain(m.block.iter().map(|b| Prim::Point(b.insert.xy())))
                 .collect(),
-            EntityKind::Image(i) => vec![Prim::Point(i.insert.xy())],
+            // A picture is picked (and snapped to) by the edges of its frame.
+            EntityKind::Image(i) => {
+                let o = i.insert.xy();
+                let (u, v) = (i.u.xy() * i.size.x, i.v.xy() * i.size.y);
+                let c = [o, o + u, o + u + v, o + v];
+                (0..4).map(|k| Prim::Seg(Segment::Line(GLine::new(c[k], c[(k + 1) % 4])))).collect()
+            }
             EntityKind::Table(t) => vec![Prim::Point(t.insert.xy())],
             EntityKind::Tolerance(t) => vec![Prim::Point(t.insert.xy())],
             EntityKind::Unknown(_) => Vec::new(),

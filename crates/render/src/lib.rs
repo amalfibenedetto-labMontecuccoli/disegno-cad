@@ -58,6 +58,17 @@ pub enum Kind {
     Point,
     /// An infinite line or ray: `verts[start]` = base, `verts[start+1]` = unit direction.
     Infinite { ray: bool },
+    /// A raster picture: `verts[start..start+4]` are its corners (bottom-left, bottom-right,
+    /// top-right, top-left); the pixels are in [`DisplayList::images`] ([`DisplayList::image`]).
+    Image,
+}
+
+/// A picture to draw: where its corners are in [`DisplayList::verts`] and its pixels.
+#[derive(Clone, Debug)]
+pub struct ImageDraw {
+    /// Index in [`DisplayList::verts`] of the first of the picture's four corners.
+    pub first_vert: u32,
+    pub pixels: cadcraft_doc::Pixels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,6 +93,8 @@ pub struct DisplayList {
     pub prims: Vec<DPrim>,
     pub verts: Vec<Vec2>,
     pub tris: Vec<Vec2>,
+    /// The pictures of the [`Kind::Image`] primitives.
+    pub images: Vec<ImageDraw>,
     /// Plots ([`build_plot`]): for each primitive, the index in [`Drawing::layers`] of the layer
     /// it is drawn on (block contents on layer 0: the block reference's; [`NO_LAYER`] when the
     /// layer isn't in the table), for PDF layers. Empty for other lists.
@@ -183,6 +196,13 @@ impl DisplayList {
             Kind::Tris | Kind::Mask => self.tris.get(p.start as usize..(p.start + p.len) as usize).unwrap_or(&[]),
             _ => self.verts.get(p.start as usize..(p.start + p.len) as usize).unwrap_or(&[]),
         }
+    }
+    /// The picture of an [`Kind::Image`] primitive.
+    pub fn image(&self, p: &DPrim) -> Option<&ImageDraw> {
+        if p.kind != Kind::Image {
+            return None;
+        }
+        self.images.iter().find(|i| i.first_vert == p.start)
     }
     /// The boundary of a filled primitive ([`Kind::Tris`], [`Kind::Mask`]) as closed polylines,
     /// for highlighting it; empty for other kinds.
@@ -370,6 +390,26 @@ impl Builder<'_> {
             kind: Kind::Polyline,
             start,
             len: pts.len() as u32,
+        });
+    }
+    /// A picture whose corners are `corners` (bottom-left, bottom-right, top-right, top-left).
+    fn image(&mut self, ctx: &Ctx, color: Ink, pixels: &cadcraft_doc::Pixels, corners: [Vec2; 4]) {
+        let start = self.list.verts.len() as u32;
+        for p in corners {
+            let q = ctx.xf.apply(p);
+            self.list.bounds.add(q);
+            self.list.verts.push(q);
+        }
+        self.list.images.push(ImageDraw { first_vert: start, pixels: pixels.clone() });
+        self.list.prims.push(DPrim {
+            handle: ctx.top,
+            color: color.rgb,
+            aci7: color.aci7,
+            lw: 0.0,
+            transparency: 0,
+            kind: Kind::Image,
+            start,
+            len: 4,
         });
     }
     fn tris(&mut self, ctx: &Ctx, color: Ink, tris: &[Vec2]) {
@@ -588,6 +628,10 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
 #[cfg(not(target_arch = "wasm32"))]
 fn append(dst: &mut DisplayList, src: DisplayList) {
     let (verts, tris, prims) = (dst.verts.len() as u32, dst.tris.len() as u32, dst.prims.len() as u32);
+    dst.images.extend(src.images.into_iter().map(|mut i| {
+        i.first_vert += verts;
+        i
+    }));
     // Pens are parallel to the primitives, with missing entries meaning "use object".
     if !src.pens.is_empty() {
         dst.pens.resize(dst.prims.len(), Pen::default());
@@ -868,6 +912,22 @@ fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
                     for piece in c.clip_infinite(*base, *dir, ray) {
                         push_raw(dst, p, Kind::Polyline, &piece);
                     }
+                }
+            }
+            // A picture is not cut at the viewport's edge: it is drawn whole when it reaches in.
+            (Kind::Image, _) => {
+                let reaches = match clip {
+                    Clip::Rect(rect) => Bounds2::from_points(pts.iter().copied()).intersects(rect),
+                    Clip::Poly(c) => pts.iter().any(|q| c.contains(*q)),
+                };
+                if let (true, Some(img)) = (reaches, src.image(p)) {
+                    let start = dst.verts.len() as u32;
+                    dst.verts.extend_from_slice(pts);
+                    for q in pts {
+                        dst.bounds.add(*q);
+                    }
+                    dst.images.push(ImageDraw { first_vert: start, pixels: img.pixels.clone() });
+                    dst.prims.push(DPrim { start, len: pts.len() as u32, ..*p });
                 }
             }
         }
@@ -1225,9 +1285,15 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             let o = i.insert.xy();
             let u = i.u.xy() * i.size.x;
             let v = i.v.xy() * i.size.y;
-            b.polyline(ctx, rgb, lw, &[o, o + u, o + u + v, o + v, o]);
-            b.polyline(ctx, rgb, lw, &[o, o + u + v]);
-            b.polyline(ctx, rgb, lw, &[o + u, o + v]);
+            match &i.pixels {
+                Some(px) if i.display & 1 != 0 => b.image(ctx, rgb, px, [o, o + u, o + u + v, o + v]),
+                // Without pixels (a linked file that isn't loaded): the frame and its diagonals.
+                _ => {
+                    b.polyline(ctx, rgb, lw, &[o, o + u, o + u + v, o + v, o]);
+                    b.polyline(ctx, rgb, lw, &[o, o + u + v]);
+                    b.polyline(ctx, rgb, lw, &[o + u, o + v]);
+                }
+            }
         }
         EntityKind::Table(t) => table(b, ctx, t, rgb, lw),
         EntityKind::Tolerance(t) => tolerance::draw(b, ctx, e, t, lw, tol),

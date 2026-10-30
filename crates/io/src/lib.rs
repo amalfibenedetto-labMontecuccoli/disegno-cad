@@ -14,6 +14,7 @@ mod dxf_write;
 mod dxf_xref;
 pub mod pdf;
 pub mod plotter;
+pub mod raster_image;
 pub mod svg;
 mod svg_read;
 
@@ -60,6 +61,13 @@ fn ext(name: &str) -> String {
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
 /// (SVG and gzip-compressed SVGZ).
 pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
+    let mut d = read_drawing(bytes, name)?;
+    // Pictures embedded in the file (see `raster_image`).
+    raster_image::restore(&mut d);
+    Ok(d)
+}
+
+fn read_drawing(bytes: &[u8], name: &str) -> Result<Drawing> {
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
         let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;

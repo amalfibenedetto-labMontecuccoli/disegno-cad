@@ -44,6 +44,7 @@ mod multiline_attributes;
 mod paperview_marker;
 mod passthrough_image_roundtrip;
 mod pdf_followups;
+mod picture_embed;
 mod pdf_layers;
 #[path = "../support/pdf_read.rs"]
 mod pdf_read;

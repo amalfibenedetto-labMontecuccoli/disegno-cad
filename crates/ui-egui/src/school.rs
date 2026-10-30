@@ -84,6 +84,7 @@ pub const SIMPLE_MENU_ITEMS: &[&str] = &[
     "new",
     "open",
     "ui.open",
+    "ui.imageattach",
     "ui.drive.open",
     "qsave",
     "saveas",

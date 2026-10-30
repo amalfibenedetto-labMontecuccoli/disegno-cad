@@ -770,6 +770,39 @@ fn clip_infinite(xf: &Xf, base: Vec2, dir: Vec2, ray: bool) -> Option<[Pos2; 2]>
     Some([xf.to_screen(a), xf.to_screen(b)])
 }
 
+/// The texture of a picture, uploaded once per picture (found again by its pixel buffer).
+fn image_texture(ctx: &egui::Context, px: &cadcraft_doc::Pixels) -> egui::TextureHandle {
+    let id = egui::Id::new(("cadcraft_picture", std::sync::Arc::as_ptr(&px.rgba) as usize));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let img = egui::ColorImage::from_rgba_unmultiplied([px.width as usize, px.height as usize], &px.rgba);
+    let t = ctx.load_texture("picture", img, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// The pictures of `list` as textured quads, in drawing order. The GPU canvas puts them under the
+/// drawing's lines (it draws lines in a paint callback), the CPU canvas draws them in place.
+fn image_shapes(p: &egui::Painter, xf: &Xf, list: &DisplayList) -> Vec<Shape> {
+    let vis = xf.world_bounds();
+    let mut shapes = Vec::new();
+    for prim in list.prims.iter().filter(|q| q.kind == Kind::Image) {
+        let (Some(img), [bl, br, tr, tl]) = (list.image(prim), list.points(prim)) else { continue };
+        if !Bounds2::from_points([*bl, *br, *tr, *tl]).intersects(&vis) {
+            continue;
+        }
+        let tex = image_texture(p.ctx(), &img.pixels);
+        let mut mesh = egui::Mesh::with_texture(tex.id());
+        for (q, uv) in [(bl, pos2(0.0, 1.0)), (br, pos2(1.0, 1.0)), (tr, pos2(1.0, 0.0)), (tl, pos2(0.0, 0.0))] {
+            mesh.vertices.push(egui::epaint::Vertex { pos: xf.to_screen(*q), uv, color: egui::Color32::WHITE });
+        }
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+        shapes.push(Shape::mesh(mesh));
+    }
+    shapes
+}
+
 /// Draw a display list.
 pub(crate) fn draw_list(p: &egui::Painter, xf: &Xf, list: &DisplayList, bg: Rgb, lwdisplay: bool) {
     let vis = xf.world_bounds();
@@ -830,8 +863,11 @@ pub(crate) fn draw_list(p: &egui::Painter, xf: &Xf, list: &DisplayList, bg: Rgb,
                     shapes.push(Shape::line_segment(seg, Stroke::new(1.0, col)));
                 }
             }
+            Kind::Image => {}
         }
     }
+    // Pictures go under everything else, as in the GPU canvas.
+    p.extend(image_shapes(p, xf, list));
     p.extend(shapes);
 }
 
@@ -980,6 +1016,7 @@ fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg: Rgb, lwdis
         c.mesh_ms = crate::now_ms() - t0;
     }
     let center = xf.rect.center();
+    p.extend(image_shapes(p, xf, list));
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
         crate::gpu::CanvasCallback {
@@ -1067,6 +1104,12 @@ pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, pri
                 for outline in list.fill_outlines(prim) {
                     line(outline.iter().map(|q| xf.to_screen(*q)).collect(), &mut shapes);
                 }
+            }
+            // A selected picture shows its frame.
+            Kind::Image => {
+                let mut frame: Vec<Pos2> = pts.iter().map(|q| xf.to_screen(*q)).collect();
+                frame.extend(frame.first().copied());
+                line(frame, &mut shapes);
             }
         }
     }

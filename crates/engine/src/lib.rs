@@ -872,7 +872,13 @@ impl Session {
 
     /// Add an entity to the current space with current properties.
     pub fn add_entity(&mut self, kind: EntityKind) -> Result<Handle> {
-        let common = self.current_common();
+        self.add_entity_with_xdata(kind, Vec::new())
+    }
+
+    /// Like [`Self::add_entity`], with extended data (xdata) on the new entity.
+    pub fn add_entity_with_xdata(&mut self, kind: EntityKind, xdata: Vec<cadcraft_doc::RawTag>) -> Result<Handle> {
+        let mut common = self.current_common();
+        common.xdata = xdata;
         let space = self.space();
         let true_color = self.doc()?.header.get("CECOLOR_RGB").and_then(|v| v.as_i64());
         let mut common = common;

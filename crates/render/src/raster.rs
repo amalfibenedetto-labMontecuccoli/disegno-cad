@@ -136,6 +136,11 @@ pub fn render(list: &DisplayList, view: &View, o: &RasterOptions) -> Option<Pixm
                     }
                 }
             }
+            Kind::Image => {
+                if let (Some(img), [bl, br, tr, tl]) = (list.image(p), pts) {
+                    draw_image(&mut pm, view, &img.pixels, [*bl, *br, *tr, *tl]);
+                }
+            }
             Kind::Infinite { ray } => {
                 let (Some(base), Some(dir)) = (pts.first(), pts.get(1)) else { continue };
                 let far = (vis.width() + vis.height()) * 2.0 + base.dist(vis.center());
@@ -153,6 +158,38 @@ pub fn render(list: &DisplayList, view: &View, o: &RasterOptions) -> Option<Pixm
         }
     }
     Some(pm)
+}
+
+/// Draw a picture whose corners are `c` (bottom-left, bottom-right, top-right, top-left).
+fn draw_image(pm: &mut Pixmap, view: &View, px: &cadcraft_doc::Pixels, c: [Vec2; 4]) {
+    // tiny-skia wants premultiplied pixels.
+    let mut data = Vec::with_capacity(px.rgba.len());
+    for p in px.rgba.chunks_exact(4) {
+        if let [r, g, b, a] = *p {
+            let m = |v: u8| ((u16::from(v) * u16::from(a) + 127) / 255) as u8;
+            data.extend_from_slice(&[m(r), m(g), m(b), a]);
+        }
+    }
+    let Some(size) = tiny_skia::IntSize::from_wh(px.width, px.height) else { return };
+    let Some(src) = Pixmap::from_vec(data, size) else { return };
+    let (bl, br, tr, tl) = (view.to_screen(c[0]), view.to_screen(c[1]), view.to_screen(c[2]), view.to_screen(c[3]));
+    let (w, h) = (px.width as f32, px.height as f32);
+    // Picture pixels → screen: x runs from the top-left to the top-right corner, y down to the bottom-left.
+    let to_screen = Transform::from_row((tr.0 - tl.0) / w, (tr.1 - tl.1) / w, (bl.0 - tl.0) / h, (bl.1 - tl.1) / h, tl.0, tl.1);
+    let paint = Paint {
+        shader: tiny_skia::Pattern::new(src.as_ref(), tiny_skia::SpreadMode::Pad, tiny_skia::FilterQuality::Bilinear, 1.0, to_screen),
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let mut pb = PathBuilder::new();
+    pb.move_to(bl.0, bl.1);
+    pb.line_to(br.0, br.1);
+    pb.line_to(tr.0, tr.1);
+    pb.line_to(tl.0, tl.1);
+    pb.close();
+    if let Some(path) = pb.finish() {
+        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    }
 }
 
 /// Render and encode as PNG.

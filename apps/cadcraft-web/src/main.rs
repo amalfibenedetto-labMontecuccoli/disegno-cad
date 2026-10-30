@@ -243,6 +243,10 @@ mod web {
             groups: cadcraft_io::entity_groups,
             entity: cadcraft_io::entity_from_groups,
         });
+        // PNG and JPEG pictures placed in the drawing (IMAGEATTACH).
+        cadcraft_engine::cmd::picture::set_picture_decoder(|b| {
+            cadcraft_io::raster_image::import(b).map(|i| cadcraft_engine::cmd::picture::Picture { pixels: i.pixels, xdata: i.xdata })
+        });
         // `?host=parent`: a same-origin page framing CADCraft (such as a Nextcloud app) opens
         // drawings in it and stores what it saves. Otherwise there is no file system here: saved
         // files reach the user as browser downloads.

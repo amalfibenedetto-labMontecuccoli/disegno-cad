@@ -608,6 +608,17 @@ impl CadApp {
             }
             return;
         }
+        // A picture (PNG, JPEG) is placed in the current drawing, not opened as a drawing.
+        if is_picture_file(path) {
+            #[cfg(not(target_arch = "wasm32"))]
+            match read_picture_file(path) {
+                Ok(bytes) => self.insert_picture(path, &bytes),
+                Err(e) => self.open_failed(format!("Insert picture: can't read {path}: {e}")),
+            }
+            #[cfg(target_arch = "wasm32")]
+            self.open_failed("Insert picture: paths are not available on the web");
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.opening.start(path);
@@ -668,9 +679,26 @@ impl CadApp {
         if is_lisp_file(name) {
             return self.load_lisp(name, &String::from_utf8_lossy(bytes));
         }
+        if is_picture_file(name) {
+            return self.insert_picture(name, bytes);
+        }
         let data = cadcraft_engine::cmd::file::base64_encode(bytes);
         let r = self.run("open", json!({ "data": data, "name": name }));
         self.opened(r);
+    }
+
+    /// Place a PNG or JPEG picture (`name`, its file contents) in the current drawing, centred in
+    /// the view (IMAGEATTACH). Failures show as a failed OPEN does.
+    pub fn insert_picture(&mut self, name: &str, bytes: &[u8]) {
+        let data = cadcraft_engine::cmd::file::base64_encode(bytes);
+        match self.run("imageattach", json!({ "data": data, "name": name })) {
+            Ok(_) => {
+                self.ui.start_tab = false;
+                let placed = i18n::with_language(self.language(), || crate::tl!("Picture placed").to_string());
+                self.set_status(format!("{}: {placed}", name.rsplit(['/', '\\']).next().unwrap_or(name)));
+            }
+            Err(e) => self.open_failed(e),
+        }
     }
 
     /// Report a file that could not be opened before OPEN ran (unreadable, too large) as a failed
@@ -942,6 +970,27 @@ pub fn now_ms() -> f64 {
 /// A LISP source file, by its name.
 fn is_lisp_file(name: &str) -> bool {
     std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("lsp"))
+}
+
+/// A PNG or JPEG picture file, by its name.
+fn is_picture_file(name: &str) -> bool {
+    std::path::Path::new(name).extension().is_some_and(|e| ["png", "jpg", "jpeg"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+}
+
+/// Largest picture file placed from a path (the engine refuses bigger ones too).
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_PICTURE_BYTES: u64 = 64 << 20;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_picture_file(path: &str) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    // Read at most one byte past the limit, so an endless device can't exhaust memory.
+    std::fs::File::open(path)?.take(MAX_PICTURE_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_PICTURE_BYTES {
+        return Err(std::io::Error::other("the picture is too large"));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

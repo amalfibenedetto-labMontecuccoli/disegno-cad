@@ -28,6 +28,7 @@ mod modify;
 mod modify2;
 mod mtext_opts;
 mod overkill;
+pub mod picture;
 mod pline_opts;
 pub mod plotters;
 mod props;
@@ -181,6 +182,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view::specs());
         v.extend(draw::specs());
         v.extend(draw2::specs());
+        v.extend(picture::specs());
         v.extend(annotate::specs());
         v.extend(mleader_edit::specs());
         v.extend(annoscale::specs());

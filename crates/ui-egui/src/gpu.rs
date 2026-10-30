@@ -234,6 +234,8 @@ pub fn build_mesh(list: &DisplayList, origin: Vec2, bg: Rgb, lwdisplay: bool) ->
             }
             // Drawn on the CPU each frame (clipped to the view).
             Kind::Infinite { .. } => {}
+            // Pictures are egui textures under the drawing (see `canvas.rs`).
+            Kind::Image => {}
         }
     }
     m
@@ -283,6 +285,14 @@ pub fn build_highlight_mesh(list: &DisplayList, prims: &[usize], origin: Vec2, c
                 }
             }
             Kind::Infinite { .. } => {}
+            Kind::Image => {
+                // A selected picture: its frame.
+                for s in pts.iter().chain(pts.first()).collect::<Vec<_>>().windows(2) {
+                    if let [a, b] = s {
+                        push_instance(&mut m.quads, rel(**a, origin), rel(**b, origin), color, width, 0.0);
+                    }
+                }
+            }
         }
     }
     m

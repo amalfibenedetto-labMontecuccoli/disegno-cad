@@ -20,6 +20,9 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
 miniz_oxide = "0.9"
+# PNG and JPEG pictures placed in a drawing (see `raster_image`).
+image = { workspace = true }
+base64 = "0.22"
 craft-pdf = { workspace = true, features = ["write"] }
 quick-xml = { workspace = true }
 

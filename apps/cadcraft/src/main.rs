@@ -124,6 +124,10 @@ pub fn install_io() {
         groups: cadcraft_io::entity_groups,
         entity: cadcraft_io::entity_from_groups,
     });
+    // PNG and JPEG pictures placed in the drawing (IMAGEATTACH).
+    cadcraft_engine::cmd::picture::set_picture_decoder(|b| {
+        cadcraft_io::raster_image::import(b).map(|i| cadcraft_engine::cmd::picture::Picture { pixels: i.pixels, xdata: i.xdata })
+    });
 }
 
 fn services() -> Services {
@@ -132,6 +136,7 @@ fn services() -> Services {
             rfd::FileDialog::new()
                 .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
                 .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
+                .add_filter(i18n::t("Pictures (PNG, JPEG)"), &["png", "jpg", "jpeg"])
                 .add_filter(i18n::t("All files"), &["*"])
                 .pick_file()
                 .map(|p| p.to_string_lossy().to_string())

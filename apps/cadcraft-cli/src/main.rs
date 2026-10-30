@@ -185,6 +185,10 @@ fn install_io() {
         groups: cadcraft_io::entity_groups,
         entity: cadcraft_io::entity_from_groups,
     });
+    // PNG and JPEG pictures placed in the drawing (IMAGEATTACH).
+    cadcraft_engine::cmd::picture::set_picture_decoder(|b| {
+        cadcraft_io::raster_image::import(b).map(|i| cadcraft_engine::cmd::picture::Picture { pixels: i.pixels, xdata: i.xdata })
+    });
 }
 
 fn open(s: &mut Session, path: &str) -> Result<(), String> {
