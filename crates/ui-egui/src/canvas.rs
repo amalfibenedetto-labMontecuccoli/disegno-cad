@@ -1062,16 +1062,80 @@ impl Look {
     }
 }
 
+/// Points past the view's edge that a dashed outline is still drawn to: more than one dash
+/// period, so a dash cut at the clip edge never shows.
+const CLIP_MARGIN: f32 = 16.0;
+
+/// The parts of a world-space polyline within `xf`'s view, as screen points, each with how far
+/// along the whole polyline it starts (in points). Clipped in world coordinates, so an outline far
+/// larger than the screen costs only what can show, and its points stay precise when zoomed far
+/// in: dashing a whole line made billions of dashes (#2299).
+fn visible_runs(xf: &Xf, pts: &[Vec2]) -> Vec<(Vec<Pos2>, f64)> {
+    let vis = xf.world_bounds().expand(f64::from(CLIP_MARGIN) / xf.scale);
+    let mut runs: Vec<(Vec<Pos2>, f64)> = Vec::new();
+    // World length before the current segment; whether the last run reaches its start.
+    let (mut along, mut open) = (0.0, false);
+    for w in pts.windows(2) {
+        let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else { continue };
+        match cadcraft_render::clip::clip_segment(a, b, &vis) {
+            Some((p, q)) => {
+                match runs.last_mut() {
+                    Some((run, _)) if open && p == a => run.push(xf.to_screen(q)),
+                    _ => runs.push((vec![xf.to_screen(p), xf.to_screen(q)], (along + a.dist(p)) * xf.scale)),
+                }
+                open = q == b;
+            }
+            None => open = false,
+        }
+        along += a.dist(b);
+    }
+    runs
+}
+
+/// Dashes along a screen polyline that starts `along` points into the outline it is part of, so
+/// they sit where they would on the whole outline.
+fn dashes(run: &[Pos2], along: f64, stroke: Stroke, dash: f32, gap: f32, out: &mut Vec<Shape>) {
+    let period = f64::from(dash + gap);
+    let offset = (period - along.rem_euclid(period)) % period;
+    out.extend(Shape::dashed_line_with_offset(run, stroke, &[dash], &[gap], offset as f32));
+}
+
+/// A dashed rectangle outline, each edge clipped to `clip` first: a rectangle zoomed far larger
+/// than the screen (a layout's printable area, a selection window) gets only the dashes that can
+/// show (#2299). Each edge keeps its direction and its dashes start where they would on the whole
+/// edge, so they don't crawl as the rectangle or the view moves.
+pub(crate) fn dashed_rect(clip: Rect, r: Rect, stroke: Stroke, dash: f32, gap: f32) -> Vec<Shape> {
+    let v = |p: Pos2| Vec2::new(f64::from(p.x), f64::from(p.y));
+    let c = clip.expand(CLIP_MARGIN);
+    let c = Bounds2::new(v(c.min), v(c.max));
+    let mut out = Vec::new();
+    let edges =
+        [(r.left_top(), r.right_top()), (r.right_top(), r.right_bottom()), (r.right_bottom(), r.left_bottom()), (r.left_bottom(), r.left_top())];
+    for (a, b) in edges {
+        if let Some((p, q)) = cadcraft_render::clip::clip_segment(v(a), v(b), &c) {
+            let pos = |w: Vec2| Pos2::new(w.x as f32, w.y as f32);
+            dashes(&[pos(p), pos(q)], v(a).dist(p), stroke, dash, gap, &mut out);
+        }
+    }
+    out
+}
+
 /// Draw selected/hovered entities as highlight overlays: `prims` are indices into `list` (from
 /// [`PrimIndex::prims`], [`prims_of`], or all of a [`VpHighlight`] list), redrawn in `color` as `look` says. A wipeout is always
 /// outlined, since filling it would hide the drawing under it.
 pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, prims: &[usize], color: Color32, look: Look) {
     let stroke = Stroke::new(look.width, color);
-    let line = |pts: Vec<Pos2>, out: &mut Vec<Shape>| {
+    let screen_line = |pts: Vec<Pos2>, along: f64, out: &mut Vec<Shape>| {
         if look.dashed {
-            out.extend(Shape::dashed_line(&pts, stroke, 6.0, 4.0));
+            dashes(&pts, along, stroke, 6.0, 4.0, out);
         } else {
             out.push(Shape::line(pts, stroke));
+        }
+    };
+    // Only the part of an outline in view (#2299).
+    let line = |pts: &[Vec2], out: &mut Vec<Shape>| {
+        for (run, along) in visible_runs(xf, pts) {
+            screen_line(run, along, out);
         }
     };
     let mut shapes = Vec::new();
@@ -1080,12 +1144,12 @@ pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, pri
     for prim in prims.iter().filter_map(|&i| list.prims.get(i)) {
         let pts = list.points(prim);
         match prim.kind {
-            Kind::Polyline => line(pts.iter().map(|q| xf.to_screen(*q)).collect(), &mut shapes),
+            Kind::Polyline => line(pts, &mut shapes),
             Kind::Infinite { ray } => {
                 if let (Some(b), Some(d)) = (pts.first(), pts.get(1))
                     && let Some(seg) = clip_infinite(xf, *b, *d, ray)
                 {
-                    line(seg.to_vec(), &mut shapes);
+                    screen_line(seg.to_vec(), 0.0, &mut shapes);
                 }
             }
             Kind::Point => {
@@ -1102,14 +1166,14 @@ pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, pri
             }
             Kind::Tris | Kind::Mask => {
                 for outline in list.fill_outlines(prim) {
-                    line(outline.iter().map(|q| xf.to_screen(*q)).collect(), &mut shapes);
+                    line(&outline, &mut shapes);
                 }
             }
             // A selected picture shows its frame.
             Kind::Image => {
                 let mut frame: Vec<Pos2> = pts.iter().map(|q| xf.to_screen(*q)).collect();
                 frame.extend(frame.first().copied());
-                line(frame, &mut shapes);
+                screen_line(frame, 0.0, &mut shapes);
             }
         }
     }
@@ -1841,8 +1905,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 xf_paper.to_screen(Vec2::new(sh.printable.min.x, sh.printable.max.y)),
                 xf_paper.to_screen(Vec2::new(sh.printable.max.x, sh.printable.min.y)),
             );
-            let pts = [pa.left_top(), pa.right_top(), pa.right_bottom(), pa.left_bottom(), pa.left_top()];
-            painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, Color32::from_gray(150)), 4.0, 4.0));
+            painter.extend(dashed_rect(painter.clip_rect(), pa, Stroke::new(1.0, Color32::from_gray(150)), 4.0, 4.0));
             (Rgb(t.paper.r(), t.paper.g(), t.paper.b()), Some(paper))
         }
         None => {
@@ -2040,8 +2103,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         let st = Stroke::new(1.0, if crossing { t.crossing_stroke } else { t.window_stroke });
         if crossing {
-            let pts = vec![r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
-            painter.extend(Shape::dashed_line(&pts, st, 5.0, 3.0));
+            painter.extend(dashed_rect(painter.clip_rect(), r, st, 5.0, 3.0));
         } else {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
         }
