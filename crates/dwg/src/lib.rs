@@ -106,6 +106,7 @@ mod native {
         current_style_names(&mut doc);
         table_merges(&mut doc);
         table_style_rows(&mut doc, false);
+        keep_sort_handles(&mut doc);
         let orphans = drop_orphaned_dgn_components(&mut doc);
         if orphans > 0 {
             let (s, were) = if orphans == 1 { ("", "was") } else { ("s", "were") };
@@ -235,6 +236,27 @@ mod native {
     /// own merge groups (173, 175, 176), so without this the merges would be lost. Tables whose
     /// cells already carry merges are left alone. Each range's first cell gets the span; the
     /// cells it covers are marked merged with no span of their own, as CADCraft's DXF writer does.
+    /// Draw-order tables (SORTENTSTABLE) keep the sort handles the file gave them. acadrust's DXF
+    /// writer renumbers them past every entity handle, but an entity left out of a table sorts by
+    /// its own handle, so after renumbering it would draw below every listed entity (#2410). Giving
+    /// the table its codes verbatim makes the writer emit them unchanged.
+    fn keep_sort_handles(doc: &mut acadrust::CadDocument) {
+        use acadrust::objects::ObjectType;
+        let version = doc.version;
+        for o in doc.objects.values_mut() {
+            let ObjectType::SortEntitiesTable(t) = o else { continue };
+            let hex = |h: acadrust::types::Handle| format!("{:X}", h.value());
+            let mut codes =
+                vec![(5, hex(t.handle)), (330, hex(t.owner_handle)), (100, "AcDbSortentsTable".to_string()), (330, hex(t.block_owner_handle))];
+            for e in t.entries() {
+                codes.push((331, hex(e.entity_handle)));
+                codes.push((5, hex(e.sort_handle)));
+            }
+            t.raw_dxf_codes = Some(codes);
+            t.raw_dxf_version = Some(version);
+        }
+    }
+
     fn table_merges(doc: &mut acadrust::CadDocument) {
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::Table(t) = e else { continue };
