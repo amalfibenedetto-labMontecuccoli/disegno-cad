@@ -20,9 +20,6 @@ mod drivefmt;
 #[cfg(target_arch = "wasm32")]
 mod host;
 
-#[cfg(any(target_arch = "wasm32", test))]
-mod panel_layout;
-
 #[cfg(target_arch = "wasm32")]
 mod web {
     use cadcraft_engine::Session;
@@ -86,14 +83,10 @@ mod web {
             self.0.raw_input_hook(raw);
             cadcraft_ui_egui::cmdline::capture_tab(ctx, raw);
         }
-        /// Preferences and validated panel placement survive reloads; egui memory is not kept.
+        /// Preferences (interface theme and language) survive reloads; egui state is not kept.
         fn save(&mut self, storage: &mut dyn eframe::Storage) {
             storage.set_string(cadcraft_ui_egui::options::PROFILE_KEY, self.0.profile_json());
             storage.set_string(cadcraft_ui_egui::PREFS_KEY, self.0.prefs_json());
-            match crate::panel_layout::save(&self.0.ui) {
-                Ok(layout) => storage.set_string(crate::panel_layout::KEY, layout),
-                Err(error) => log::warn!("panel layout was not saved: {error}"),
-            }
         }
         fn persist_egui_memory(&self) -> bool {
             false
@@ -293,11 +286,6 @@ mod web {
                         }
                         if let Some(prefs) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::PREFS_KEY)) {
                             app.load_prefs(&prefs);
-                        }
-                        if let Some(layout) = cc.storage.and_then(|s| s.get_string(crate::panel_layout::KEY))
-                            && let Err(error) = crate::panel_layout::restore(&mut app.ui, &layout)
-                        {
-                            log::warn!("panel layout was not restored: {error}");
                         }
                         // `?cpu`: no render state for the app, so the canvas draws with egui shapes.
                         if !crate::wants_cpu(&query())
