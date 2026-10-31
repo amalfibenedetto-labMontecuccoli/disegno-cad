@@ -750,7 +750,6 @@ thread_local! {
 }
 
 /// Panics when a test asked for `stage` to fail (see [`PANIC_IN`]); does nothing otherwise.
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::panic)]
 fn fail_in_test(_stage: &str) {
     #[cfg(test)]
